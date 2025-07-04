@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Account Disattivato</title>
+</head>
+<body style="font-family: Arial, sans-serif; color: #333; background-color: #f9f9f9; padding: 20px;">
+<div style="max-width: 600px; margin: 0 auto; background-color: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+    <h2 style="color: #c0392b;">Account Disattivato</h2>
+    <p th:text="'Ciao ' + ${name} + ','">Ciao [Nome],</p>
+
+    <p>
+        Ti informiamo che il tuo account è stato <strong>disattivato</strong> da un amministratore.
+    </p>
+
+    <p>
+        Se pensi si tratti di un errore o desideri ulteriori chiarimenti, ti invitiamo a contattarci.
+    </p>
+
+    <p style="margin-top: 30px;">
+        Cordiali saluti,<br/>
+        <strong>Il team di supporto</strong>
+    </p>
+</div>
+</body>
+</html>
