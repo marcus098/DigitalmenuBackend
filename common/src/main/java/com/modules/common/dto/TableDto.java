@@ -17,6 +17,8 @@ public class TableDto {
     private String location;
     @JsonIgnore
     private String sessionId;
+    @JsonIgnore
+    private Long idAgency;
     @JsonView(Views.Updating.class)
     private String sessionUpdating;
     @JsonView(Views.Updating.class)
@@ -38,6 +40,7 @@ public class TableDto {
         this.h = tableEntity.getH();
         this.location = tableEntity.getLocation();
         this.sessionId = tableEntity.getSessionId();
+        this.idAgency = tableEntity.getIdAgency();
     }
 
     public TableDto(TableEntity tableEntity, String sessionUpdating, String changeType) {
@@ -52,6 +55,7 @@ public class TableDto {
         this.h = tableEntity.getH();
         this.location = tableEntity.getLocation();
         this.sessionId = tableEntity.getSessionId();
+        this.idAgency = tableEntity.getIdAgency();
         this.sessionUpdating = sessionUpdating;
         this.changeType = changeType;
     }
@@ -78,6 +82,14 @@ public class TableDto {
 
     public void setSessionId(String sessionId) {
         this.sessionId = sessionId;
+    }
+
+    public Long getIdAgency() {
+        return idAgency;
+    }
+
+    public void setIdAgency(Long idAgency) {
+        this.idAgency = idAgency;
     }
 
     public String getLocation() {

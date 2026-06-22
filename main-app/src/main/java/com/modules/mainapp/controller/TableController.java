@@ -2,11 +2,11 @@ package com.modules.mainapp.controller;
 
 import com.modules.common.dto.TableDto;
 import com.modules.common.responses.DataResponse;
+import com.modules.mainapp.esl.EslService;
 import com.modules.tablemodule.requests.AddTable;
 import com.modules.tablemodule.requests.UpdateTables;
 import com.modules.tablemodule.service.TableService;
 import jakarta.validation.constraints.Min;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -20,6 +20,9 @@ import java.util.List;
 public class TableController {
     @Autowired
     private TableService tableService;
+
+    @Autowired
+    private EslService eslService;
 
     @PreAuthorize("hasRole('ROLE_ADMIN')")
     @PostMapping("/add")
@@ -79,6 +82,9 @@ public class TableController {
     @GetMapping("/takes/{idTable}/{seats}")
     public ResponseEntity<DataResponse<String>> takesTable(@PathVariable("idTable") @Min(1) long idTable, @PathVariable("seats") @Min(1) int seats) {
         String newCode = tableService.setBusy(idTable, true, seats);
+        if (newCode != null && !newCode.equals("400") && !newCode.equals("404")) {
+            eslService.updateTableTag(idTable);
+        }
         return ResponseEntity.status(newCode == null ? 400 : 200).body(new DataResponse<String>(null, newCode));
     }
 

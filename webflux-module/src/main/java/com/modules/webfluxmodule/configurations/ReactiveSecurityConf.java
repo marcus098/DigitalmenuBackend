@@ -50,6 +50,7 @@ public class ReactiveSecurityConf {
                 .authorizeExchange(exchanges -> exchanges
                         .pathMatchers("/api/public/client/**").permitAll()
                         .pathMatchers("/api/public/updates/**").permitAll()
+                        .pathMatchers("/api/public/orders/**").permitAll()
                         .pathMatchers("/api/test").permitAll()
                         .pathMatchers("/api/auth/admin").permitAll()
                         .pathMatchers("/api/dashboard/getAll").authenticated()

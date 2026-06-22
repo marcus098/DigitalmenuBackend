@@ -1,6 +1,7 @@
 package com.modules.webfluxmodule.kafka;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.modules.common.dto.CategoryDto;
 import com.modules.common.dto.IngredientDto;
@@ -57,6 +58,21 @@ public class AggregatingKafkaConsumer {
             addDataToCache(agencyId, "categories", categories);
             lastOriginatingSession.put(agencyId, categories.get(0).getSessionUpdating());
             // 2. Schedula (o rischedula) l'invio
+            scheduleBroadcast(agencyId);
+        });
+    }
+
+    @KafkaListener(topics = "order-updated", groupId = "aggregator-group", containerFactory = "kafkaListenerContainerFactory")
+    public void listenOrdersBatch(List<String> orderJsonList) {
+        Map<Long, List<Map<String, Object>>> ordersByAgency = new HashMap<>();
+        for (String json : orderJsonList) {
+            Map<String, Object> event = parseOrderEvent(json);
+            if (event == null) continue;
+            Long agencyId = ((Number) event.get("idAgency")).longValue();
+            ordersByAgency.computeIfAbsent(agencyId, k -> new ArrayList<>()).add(event);
+        }
+        ordersByAgency.forEach((agencyId, orders) -> {
+            addDataToCache(agencyId, "orders", orders);
             scheduleBroadcast(agencyId);
         });
     }
@@ -123,6 +139,11 @@ public class AggregatingKafkaConsumer {
 
         // Memorizza il riferimento al nuovo task
         scheduledTasks.put(agencyId, newScheduledTask);
+    }
+
+    private Map<String, Object> parseOrderEvent(String json) {
+        try { return objectMapper.readValue(json, new TypeReference<Map<String, Object>>() {}); }
+        catch (Exception e) { ErrorLog.logger.error("Error parsing order event: " + json, e); return null; }
     }
 
     private CategoryDto deserializeCategory(String json) {

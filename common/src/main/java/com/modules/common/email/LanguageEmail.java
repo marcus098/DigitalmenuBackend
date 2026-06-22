@@ -208,6 +208,45 @@ public class LanguageEmail {
         return map;
     }
 
+    public static Map<String, String> getFidelityCard(String language, String localeName, String cardCode, boolean typePoints, int scope, double priceForPoint) {
+        Map<String, String> map = new HashMap<>();
+        String scopeStr = String.valueOf(scope);
+        String priceStr = String.format("%.2f", priceForPoint);
+
+        if (language.equals(IT)) {
+            map.put("title", "La tua Carta Fedeltà");
+            map.put("greeting", "Ecco la tua carta fedeltà di " + localeName + ":");
+            map.put("cardTypeLabel", typePoints ? "Tipo: Carta Punti" : "Tipo: Carta Timbri");
+            map.put("scopeLabel", typePoints
+                    ? "Obiettivo: <span>" + scopeStr + " punti</span> (€" + priceStr + " per punto)"
+                    : "Timbri necessari: <span>" + scopeStr + "</span>");
+            map.put("instructions", "Mostra il codice QR al locale per accumulare punti ad ogni visita.");
+            map.put("closing", "Grazie,");
+            map.put("team", "The Weitmenu Team");
+        } else if (language.equals(ES)) {
+            map.put("title", "Tu Tarjeta de Fidelidad");
+            map.put("greeting", "Aquí tienes tu tarjeta de fidelidad de " + localeName + ":");
+            map.put("cardTypeLabel", typePoints ? "Tipo: Tarjeta de Puntos" : "Tipo: Tarjeta de Sellos");
+            map.put("scopeLabel", typePoints
+                    ? "Objetivo: <span>" + scopeStr + " puntos</span> (€" + priceStr + " por punto)"
+                    : "Sellos necesarios: <span>" + scopeStr + "</span>");
+            map.put("instructions", "Muestra el código QR en el local para acumular puntos en cada visita.");
+            map.put("closing", "Gracias,");
+            map.put("team", "El equipo de Weitmenu");
+        } else {
+            map.put("title", "Your Loyalty Card");
+            map.put("greeting", "Here is your loyalty card for " + localeName + ":");
+            map.put("cardTypeLabel", typePoints ? "Type: Points Card" : "Type: Stamp Card");
+            map.put("scopeLabel", typePoints
+                    ? "Goal: <span>" + scopeStr + " points</span> (€" + priceStr + " per point)"
+                    : "Stamps needed: <span>" + scopeStr + "</span>");
+            map.put("instructions", "Show the QR code at the venue to collect points on every visit.");
+            map.put("closing", "Thank you,");
+            map.put("team", "The Weitmenu Team");
+        }
+        return map;
+    }
+
     public static Map<String, String> getWaiterInvitation(String language) {
         Map<String, String> map = new HashMap<>();
         if (language.equals(IT)) {

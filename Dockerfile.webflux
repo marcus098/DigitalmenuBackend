@@ -1,0 +1,25 @@
+FROM maven:3.9-eclipse-temurin-17-alpine AS builder
+WORKDIR /app
+
+# Only the two modules needed — don't touch the root pom so Maven never
+# validates the other <module> entries that aren't copied here.
+COPY common/pom.xml common/
+COPY webflux-module/pom.xml webflux-module/
+
+RUN mvn dependency:go-offline -B -q -f common/pom.xml || true && \
+    mvn dependency:go-offline -B -q -f webflux-module/pom.xml || true
+
+COPY common/src common/src/
+COPY webflux-module/src webflux-module/src/
+
+RUN mvn install -Dmaven.test.skip=true -B -q -f common/pom.xml && \
+    mvn package -Dmaven.test.skip=true -B -q -f webflux-module/pom.xml
+
+FROM eclipse-temurin:17-jre-alpine
+WORKDIR /app
+COPY --from=builder /app/webflux-module/target/webflux-module-*.jar app.jar
+EXPOSE 8081
+ENTRYPOINT ["java", \
+  "-XX:+UseContainerSupport", \
+  "-XX:MaxRAMPercentage=75.0", \
+  "-jar", "app.jar"]

@@ -1,0 +1,7 @@
+**/target
+.git
+.gitignore
+*.md
+.idea
+**/.DS_Store
+kafka_docker

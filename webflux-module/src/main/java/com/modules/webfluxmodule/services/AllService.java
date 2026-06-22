@@ -60,7 +60,7 @@ public class AllService {
                         Flux<TableDto> tablesFlux = auth ? getTables(agency.getId()) : Flux.empty();
                         Flux<ImageDto> imagesFlux = auth ? getImages(agency.getId()) : Flux.empty();
                         Mono<StyleDto> styleMono = getStyle(agency.getId());
-                        Flux<ComandReactive> comandFlux = auth ? getComands(idAgency) : Flux.empty();
+                        Flux<ComandReactive> comandFlux = auth ? getComands(idAgency).onErrorResume(e -> Flux.empty()) : Flux.empty();
 
                         return Mono.zip(
                                 categoriesFlux.collectList(),
@@ -143,6 +143,10 @@ public class AllService {
     public Flux<ComandReactive> getComandsByStatus(boolean completed, LocalDateTime localDateTime, long idAgency) {
         LocalDateTime before = localDateTime.plusDays(1);
         return webfluxComandRepository.findAllByStatusAndIdAgencyAndCreatedAtBetween(completed ? ComandStatus.COMPLETED.toString() : ComandStatus.DELETED.toString(), idAgency, localDateTime, before);
+    }
+
+    public Mono<ComandReactive> getComandById(String comandId) {
+        return webfluxComandRepository.findById(comandId);
     }
 
     // query per cercare le comande del tavolo

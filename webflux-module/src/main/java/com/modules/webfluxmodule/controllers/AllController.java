@@ -74,7 +74,9 @@ public class AllController {
             LocalDate parsedDate = LocalDate.parse(date);
             return getAuthenticatedUser()
                     .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Utente non autenticato")))
-                    .flatMapMany(user -> allService.getComandsByStatus(true, LocalDateTime.of(parsedDate, LocalTime.MIDNIGHT), user.getId_agency()));
+                    .flatMapMany(user -> allService.getComandsByStatus(true, LocalDateTime.of(parsedDate, LocalTime.MIDNIGHT), user.getId_agency()))
+                    .onErrorResume(ResponseStatusException.class, Flux::error)
+                    .onErrorResume(e -> Flux.empty());
         } catch (DateTimeParseException e) {
             return Flux.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Formato data non valido. Usa YYYY-MM-DD."));
         }
@@ -86,7 +88,9 @@ public class AllController {
             LocalDate parsedDate = LocalDate.parse(date);
             return getAuthenticatedUser()
                     .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Utente non autenticato")))
-                    .flatMapMany(user -> allService.getComandsByStatus(false, LocalDateTime.of(parsedDate, LocalTime.MIDNIGHT), user.getId_agency()));
+                    .flatMapMany(user -> allService.getComandsByStatus(false, LocalDateTime.of(parsedDate, LocalTime.MIDNIGHT), user.getId_agency()))
+                    .onErrorResume(ResponseStatusException.class, Flux::error)
+                    .onErrorResume(e -> Flux.empty());
         } catch (DateTimeParseException e) {
             return Flux.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Formato data non valido. Usa YYYY-MM-DD."));
         }
@@ -103,6 +107,22 @@ public class AllController {
     public Mono<ListToExport> getAllClient(@PathVariable("localname") String localname) {
         System.out.println(localname);
         return allService.getAll(Mono.empty(), -1L, localname, false);
+    }
+
+    @GetMapping("/public/orders/{comandId}")
+    public Mono<ComandReactive> getClientOrder(@PathVariable String comandId) {
+        return allService.getComandById(comandId)
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Comanda non trovata")));
+    }
+
+    @GetMapping("/public/orders/table/{tableId}")
+    public Flux<ComandReactive> getClientOrderHistory(
+            @PathVariable long tableId,
+            @RequestParam String localname
+    ) {
+        return agencyService.findByIdAgencyOrNameAndDeleted(null, localname)
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Ristorante non trovato")))
+                .flatMapMany(agency -> allService.getComandsByTableSessionId(tableId, agency.getId()));
     }
 
 

@@ -24,6 +24,10 @@ public class StyleDto {
     private String cardStyle;
     private boolean showImages;
     private String font;
+    private String description;
+    private String openingHours;
+    private String whatsapp;
+    private String tiktokUrl;
     @JsonView(Views.Updating.class)
     private String sessionUpdating;
     @JsonView(Views.Updating.class)
@@ -41,7 +45,7 @@ public class StyleDto {
         System.out.println(style);
         this.backgroundGradient = style.getBackgroundGradient().isEmpty() ? new ArrayList<>() : Arrays.stream(style.getBackgroundGradient().split(";")).toList();
         this.cardBackground = style.getCardBackground();
-        this.primary = style.getTextOnPrimary();
+        this.primary = style.getPrimaryColor();
         this.textBody = style.getTextBody();
         this.textOnPrimary = style.getTextOnPrimary();
         this.textTitle = style.getTextTitle();
@@ -55,6 +59,10 @@ public class StyleDto {
         this.cardStyle = style.getCardStyle();
         this.showImages = style.isShowImages();
         this.font = style.getFont();
+        this.description = style.getDescription();
+        this.openingHours = style.getOpeningHours();
+        this.whatsapp = style.getWhatsapp();
+        this.tiktokUrl = style.getTiktokUrl();
     }
 
     public StyleDto(String backgroundGradient, String cardBackground, String primary, String textBody, String textOnPrimary, String textTitle, String address, String phone, String facebookUrl, String instagramUrl, String heroImageUrl, String logoUrl, String restaurantName, String cardStyle, boolean showImages, String font, String sessionUpdating, String changeType) {
@@ -228,6 +236,18 @@ public class StyleDto {
     public void setFont(String font) {
         this.font = font;
     }
+
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
+
+    public String getOpeningHours() { return openingHours; }
+    public void setOpeningHours(String openingHours) { this.openingHours = openingHours; }
+
+    public String getWhatsapp() { return whatsapp; }
+    public void setWhatsapp(String whatsapp) { this.whatsapp = whatsapp; }
+
+    public String getTiktokUrl() { return tiktokUrl; }
+    public void setTiktokUrl(String tiktokUrl) { this.tiktokUrl = tiktokUrl; }
 
     public String getSessionUpdating() {
         return sessionUpdating;

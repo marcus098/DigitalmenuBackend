@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="it" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conferma il Tuo Account</title>
+    <style>
+        /* Stili base per la compatibilità email */
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 600px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #ffffff;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .header {
+            text-align: center;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #ddd;
+        }
+        .header img {
+            max-width: 150px;
+        }
+        .content {
+            padding: 20px 0;
+        }
+        .cta-button {
+            display: block;
+            width: 200px;
+            margin: 20px auto;
+            padding: 15px;
+            background-color: #007bff;
+            color: #ffffff;
+            text-align: center;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .footer {
+            text-align: center;
+            font-size: 12px;
+            color: #777;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+        }
+        /* È buona norma usare CSS inline per la massima compatibilità,
+           ma per leggibilità qui usiamo un tag <style>.
+           Esistono tool che convertono questo in stili inline prima dell'invio. */
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>Un ultimo passaggio...</h1>
+    </div>
+    <div class="content">
+        <p>Ciao <strong th:text="${nomeProprietario}">Mario Rossi</strong>,</p>
+        <p>
+            Grazie per esserti registrato su RistoSmart! Per attivare il tuo account e garantirne la sicurezza,
+            ti chiediamo di confermare il tuo indirizzo email cliccando sul pulsante qui sotto.
+        </p>
+
+        <a th:href="${confermaUrl}" href="#" class="cta-button">Conferma il Mio Account</a>
+
+        <p>
+            Se il pulsante non funziona, puoi copiare e incollare il seguente link nel tuo browser:
+        </p>
+        <p>
+            <a th:href="${confermaUrl}" th:text="${confermaUrl}">link di conferma</a>
+        </p>
+        <p>
+            Questo link di conferma scadrà tra 24 ore. Se non hai richiesto tu questa registrazione, puoi tranquillamente ignorare questa email.
+        </p>
+        <p>Grazie,<br>Il Team di RistoSmart</p>
+    </div>
+    <div class="footer">
+        <p>&copy; <span th:text="${#dates.year(#dates.createNow())}">2025</span> RistoSmart. Tutti i diritti riservati.</p>
+    </div>
+</div>
+</body>
+</html>

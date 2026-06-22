@@ -4,6 +4,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.data.mongodb.repository.config.EnableMongoRepositories;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication(scanBasePackages = {
 		"com.modules.ingredientmodule",
@@ -31,7 +32,11 @@ import org.springframework.data.mongodb.repository.config.EnableMongoRepositorie
 		"com.modules.tablemodule.repository",
 		"com.modules.filemodule.repository",
 		"com.modules.productmodule.repository",
+		"com.modules.mainapp.reservation.repository",
+		"com.modules.mainapp.payment.repository",
+		"com.modules.mainapp.esl",
 })
+@EnableScheduling
 @EnableMongoRepositories(basePackages = {
 		"com.modules.ingredientmodule.repository.mongo",
 		"com.modules.categorymodule.repository.mongo",

@@ -21,6 +21,10 @@ public abstract class Style {
     private boolean showImages;
     private long idAgency;
     private String font;
+    private String description;
+    private String openingHours;
+    private String whatsapp;
+    private String tiktokUrl;
     private OffsetDateTime updatedAt;
     private boolean deleted;
 
@@ -236,6 +240,18 @@ public abstract class Style {
     public void setFont(String font) {
         this.font = font;
     }
+
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
+
+    public String getOpeningHours() { return openingHours; }
+    public void setOpeningHours(String openingHours) { this.openingHours = openingHours; }
+
+    public String getWhatsapp() { return whatsapp; }
+    public void setWhatsapp(String whatsapp) { this.whatsapp = whatsapp; }
+
+    public String getTiktokUrl() { return tiktokUrl; }
+    public void setTiktokUrl(String tiktokUrl) { this.tiktokUrl = tiktokUrl; }
 
     public OffsetDateTime getUpdatedAt() {
         return updatedAt;

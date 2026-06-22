@@ -5,7 +5,9 @@ import com.modules.common.dto.UserDto;
 import com.modules.common.model.OptionInProduct;
 import com.modules.common.responses.DataResponse;
 import com.modules.common.utilities.Utilities;
+import com.modules.common.logs.errorlog.ErrorLog;
 import com.modules.productmodule.requests.AddProduct;
+import com.modules.productmodule.requests.ChangeOrder;
 import com.modules.productmodule.requests.UpdateProduct;
 import com.modules.productmodule.service.ProductService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -62,6 +64,20 @@ public class ProductController {
         int status = productService.deleteProduct(idProduct);
 
         return ResponseEntity.status(status).body(status == 200 ? "OK" : "Errore");
+    }
+
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
+    @PostMapping("/changeOrder")
+    public ResponseEntity<?> changeOrder(@RequestBody ChangeOrder changeOrder) {
+        if (!changeOrder.validate())
+            return ResponseEntity.badRequest().body(null);
+        int status = 400;
+        try {
+            status = productService.changeOrder(changeOrder.getList());
+        } catch (Exception e) {
+            ErrorLog.logger.error("Errore changeOrder product", e);
+        }
+        return ResponseEntity.status(status).body(status == 200 ? "Order changed successfully" : "Order update failed");
     }
 
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
