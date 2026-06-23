@@ -75,9 +75,7 @@ public class OrderComandService {
                     TableDto tableEntityJpa = tableUtils.findByIdAndIdAgencyAndDeleted(addComandWaiter.getIdTable(), idAgency).orElseThrow(() -> new EntityNotFoundException("Tavolo non trovato o eliminato"));
                     if(!tableEntityJpa.isBusy()){
                         tableEntityJpa.setBusy(true);
-                        tableEntityJpa.setSeats(1);
-                        //todo meglio fare un controllo nel frontend per occupare il tavolo
-                        // todo attualmente il default e' un posto, permettere di modificare i posti
+                        tableEntityJpa.setSeats(addComandWaiter.getSeats() > 0 ? addComandWaiter.getSeats() : 1);
                         tableEntityJpa.setSessionId(UUID.randomUUID().toString().concat(Long.toString(System.currentTimeMillis())));
                         tableEntityJpa = tableUtils.save(tableEntityJpa, idAgency);
                     }

@@ -61,8 +61,8 @@ public class ImageService {
             imageToDelete.setDeleted(true);
             imageToDelete.setDeletedAt(OffsetDateTime.now());
             imageRepository.save(imageToDelete);
-            categoryRepository.updateImageToEmpty(imageToDelete.getName());
-            productUtils.updateImageToEmpty(imageToDelete.getName());
+            categoryRepository.updateImageToEmpty(imageToDelete.getName(), idAgency);
+            productUtils.updateImageToEmpty(imageToDelete.getName(), idAgency);
             return true;
         } catch (Exception e) {
             ErrorLog.logger.error("Errore eliminazione immagine ", e);
@@ -82,8 +82,8 @@ public class ImageService {
             imageToDelete.setDeletedAt(OffsetDateTime.now());
             utilities.moveFile(imagesPath + separator + imageName, deletedImagesPath + separator + imageName);
             imageRepository.save(imageToDelete);
-            categoryRepository.updateImageToEmpty(imageName);
-            productUtils.updateImageToEmpty(imageName);
+            categoryRepository.updateImageToEmpty(imageName, idAgency);
+            productUtils.updateImageToEmpty(imageName, idAgency);
             return true;
         } catch (Exception e) {
             ErrorLog.logger.error("Errore eliminazione immagine ", e);
@@ -103,8 +103,8 @@ public class ImageService {
             imageToDelete.setDeletedAt(OffsetDateTime.now());
             imageRepository.save(imageToDelete);
 
-            productUtils.updateImageToEmpty(imageToDelete.getName());
-            categoryRepository.updateImageToEmpty(imageToDelete.getName());
+            productUtils.updateImageToEmpty(imageToDelete.getName(), idAgency);
+            categoryRepository.updateImageToEmpty(imageToDelete.getName(), idAgency);
 
             s3Client.copyObject(CopyObjectRequest.builder()
                     .sourceBucket(BUCKET_NAME)
@@ -144,8 +144,8 @@ public class ImageService {
             imageToDelete.setDeletedAt(OffsetDateTime.now());
             imageRepository.save(imageToDelete);
 
-            productUtils.updateImageToEmpty(imageToDelete.getName());
-            categoryRepository.updateImageToEmpty(imageToDelete.getName());
+            productUtils.updateImageToEmpty(imageToDelete.getName(), idAgency);
+            categoryRepository.updateImageToEmpty(imageToDelete.getName(), idAgency);
 
             s3Client.copyObject(CopyObjectRequest.builder()
                     .sourceBucket(BUCKET_NAME)

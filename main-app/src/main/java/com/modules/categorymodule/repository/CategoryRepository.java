@@ -35,7 +35,7 @@ public interface CategoryRepository extends JpaRepository<CategoryJpa, Long> {
 
     @Modifying
     @Transactional
-    @Query("UPDATE CategoryJpa c SET c.image = '' WHERE c.deleted = false and c.image = :imageName")
-    void updateImageToEmpty(String imageName);
+    @Query("UPDATE CategoryJpa c SET c.image = '' WHERE c.deleted = false and c.image = :imageName and c.idAgency = :idAgency")
+    void updateImageToEmpty(@Param("imageName") String imageName, @Param("idAgency") long idAgency);
 
 }

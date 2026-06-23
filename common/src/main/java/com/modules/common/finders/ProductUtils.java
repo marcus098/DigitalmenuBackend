@@ -14,5 +14,5 @@ public interface ProductUtils {
     List<ProductDto> findProductsByConditions(List<Long> ids, long idAgency);
     List<ProductDto> findAllByIdInAndIdAgencyAndDeleted(Set<Long> ids, long idAgency);
     List<ProductDto> findAllByIngredientIdAndDeleted(long id, long idAgency);
-    void updateImageToEmpty(String name);
+    void updateImageToEmpty(String name, long idAgency);
 }

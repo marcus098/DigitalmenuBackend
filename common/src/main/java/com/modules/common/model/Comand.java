@@ -15,8 +15,17 @@ public abstract class Comand {
     private ComandStatus status;
     private Long idAgency;
     private String tableSessionId;
+    private String clientSessionId;
 
     public Comand() {}
+
+    public String getClientSessionId() {
+        return clientSessionId;
+    }
+
+    public void setClientSessionId(String clientSessionId) {
+        this.clientSessionId = clientSessionId;
+    }
 
     public Comand(Long idAgency, ComandType comandType) {
         this.idAgency = idAgency;

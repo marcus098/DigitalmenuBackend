@@ -51,6 +51,7 @@ public class ReactiveSecurityConf {
                         .pathMatchers("/api/public/client/**").permitAll()
                         .pathMatchers("/api/public/updates/**").permitAll()
                         .pathMatchers("/api/public/orders/**").permitAll()
+                        .pathMatchers("/api/public/sessions/**").permitAll()
                         .pathMatchers("/api/test").permitAll()
                         .pathMatchers("/api/auth/admin").permitAll()
                         .pathMatchers("/api/dashboard/getAll").authenticated()

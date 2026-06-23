@@ -71,8 +71,8 @@ public class ProductUtilsImpl implements ProductUtils {
     }
 
     @Override
-    public void updateImageToEmpty(String name) {
-        productRepository.updateImageToEmpty(name);
+    public void updateImageToEmpty(String name, long idAgency) {
+        productRepository.updateImageToEmpty(name, idAgency);
     }
 
     private List<ProductDto> returnToDto(List<ProductJpa> prods) {

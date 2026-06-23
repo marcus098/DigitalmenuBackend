@@ -13,6 +13,7 @@ public class AddComandWaiter implements Request {
     private String address = "";
     private String phone = "";
     private String time = "";
+    private int seats = 1;
     private ComandWaiterType comandWaiterType;
 
     public AddComandWaiter() {
@@ -33,6 +34,14 @@ public class AddComandWaiter implements Request {
 
     public void setTime(String time) {
         this.time = time;
+    }
+
+    public int getSeats() {
+        return seats;
+    }
+
+    public void setSeats(int seats) {
+        this.seats = seats;
     }
 
     public void setComandWaiterType(ComandWaiterType comandWaiterType) {

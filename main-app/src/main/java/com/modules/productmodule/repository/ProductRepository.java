@@ -48,7 +48,7 @@ public interface ProductRepository extends JpaRepository<ProductJpa, Long> {
 
     @Modifying
     @Transactional
-    @Query("UPDATE ProductJpa p SET p.image = '' WHERE p.deleted = false and p.image = :imageName")
-    void updateImageToEmpty(String imageName);
+    @Query("UPDATE ProductJpa p SET p.image = '' WHERE p.deleted = false and p.image = :imageName and p.idAgency = :idAgency")
+    void updateImageToEmpty(@Param("imageName") String imageName, @Param("idAgency") long idAgency);
 
 }
