@@ -21,6 +21,7 @@ public class UpdateStyle {
     private String openingHours;
     private String whatsapp;
     private String tiktokUrl;
+    private String landingTemplate;
 
     public UpdateStyle() {
 
@@ -165,4 +166,7 @@ public class UpdateStyle {
 
     public String getTiktokUrl() { return tiktokUrl; }
     public void setTiktokUrl(String tiktokUrl) { this.tiktokUrl = tiktokUrl; }
+
+    public String getLandingTemplate() { return landingTemplate; }
+    public void setLandingTemplate(String landingTemplate) { this.landingTemplate = landingTemplate; }
 }

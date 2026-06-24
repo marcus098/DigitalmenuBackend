@@ -28,6 +28,7 @@ public class StyleDto {
     private String openingHours;
     private String whatsapp;
     private String tiktokUrl;
+    private String landingTemplate;
     @JsonView(Views.Updating.class)
     private String sessionUpdating;
     @JsonView(Views.Updating.class)
@@ -63,6 +64,7 @@ public class StyleDto {
         this.openingHours = style.getOpeningHours();
         this.whatsapp = style.getWhatsapp();
         this.tiktokUrl = style.getTiktokUrl();
+        this.landingTemplate = style.getLandingTemplate();
     }
 
     public StyleDto(String backgroundGradient, String cardBackground, String primary, String textBody, String textOnPrimary, String textTitle, String address, String phone, String facebookUrl, String instagramUrl, String heroImageUrl, String logoUrl, String restaurantName, String cardStyle, boolean showImages, String font, String sessionUpdating, String changeType) {
@@ -248,6 +250,9 @@ public class StyleDto {
 
     public String getTiktokUrl() { return tiktokUrl; }
     public void setTiktokUrl(String tiktokUrl) { this.tiktokUrl = tiktokUrl; }
+
+    public String getLandingTemplate() { return landingTemplate; }
+    public void setLandingTemplate(String landingTemplate) { this.landingTemplate = landingTemplate; }
 
     public String getSessionUpdating() {
         return sessionUpdating;

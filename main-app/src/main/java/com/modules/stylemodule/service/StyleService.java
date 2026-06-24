@@ -68,6 +68,7 @@ public class StyleService {
         if (updateStyle.getOpeningHours() != null) style.setOpeningHours(updateStyle.getOpeningHours());
         if (updateStyle.getWhatsapp() != null) style.setWhatsapp(updateStyle.getWhatsapp());
         if (updateStyle.getTiktokUrl() != null) style.setTiktokUrl(updateStyle.getTiktokUrl());
+        if (updateStyle.getLandingTemplate() != null) style.setLandingTemplate(updateStyle.getLandingTemplate());
         style.setUpdatedAt(OffsetDateTime.now());
 
         style = styleRepository.save(style);

@@ -73,6 +73,10 @@ public class StyleJpa extends Style {
     public String getTiktokUrl() { return super.getTiktokUrl(); }
 
     @Override
+    @Column(name = "landing_template")
+    public String getLandingTemplate() { return super.getLandingTemplate(); }
+
+    @Override
     public String getAddress() {
         return super.getAddress();
     }

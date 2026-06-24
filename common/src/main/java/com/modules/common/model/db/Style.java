@@ -25,6 +25,7 @@ public abstract class Style {
     private String openingHours;
     private String whatsapp;
     private String tiktokUrl;
+    private String landingTemplate;
     private OffsetDateTime updatedAt;
     private boolean deleted;
 
@@ -252,6 +253,9 @@ public abstract class Style {
 
     public String getTiktokUrl() { return tiktokUrl; }
     public void setTiktokUrl(String tiktokUrl) { this.tiktokUrl = tiktokUrl; }
+
+    public String getLandingTemplate() { return landingTemplate; }
+    public void setLandingTemplate(String landingTemplate) { this.landingTemplate = landingTemplate; }
 
     public OffsetDateTime getUpdatedAt() {
         return updatedAt;
