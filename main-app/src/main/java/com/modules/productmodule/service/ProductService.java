@@ -92,6 +92,7 @@ public class ProductService {
             return productMapper.toDto(product);
 
         } catch (Exception e) {
+            ErrorLog.logger.error("Errore addProduct", e);
             return null;
         }
     }
