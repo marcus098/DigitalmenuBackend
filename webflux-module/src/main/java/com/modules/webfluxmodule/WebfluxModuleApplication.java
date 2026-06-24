@@ -1,6 +1,7 @@
 package com.modules.webfluxmodule;
 
 import org.springframework.boot.SpringApplication;
+import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication(scanBasePackages = {
@@ -10,7 +11,9 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class WebfluxModuleApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(WebfluxModuleApplication.class, args);
+        SpringApplication app = new SpringApplication(WebfluxModuleApplication.class);
+        app.setWebApplicationType(WebApplicationType.REACTIVE);
+        app.run(args);
     }
 
 }
