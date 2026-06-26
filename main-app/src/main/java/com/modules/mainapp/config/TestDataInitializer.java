@@ -10,6 +10,7 @@ import com.modules.common.dto.StyleDto;
 import com.modules.common.finders.StyleUtils;
 import com.modules.common.logs.errorlog.ErrorLog;
 import com.modules.common.model.enums.Role;
+import com.modules.stylemodule.repository.StyleRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -29,44 +30,48 @@ public class TestDataInitializer implements CommandLineRunner {
     @Autowired private UserRepository    userRepository;
     @Autowired private PasswordEncoder   passwordEncoder;
     @Autowired private StyleUtils        styleUtils;
+    @Autowired private StyleRepository   styleRepository;
     @Autowired private CategoryRepository categoryRepository;
 
     @Override
     public void run(String... args) {
-        AgencyJpa agency;
+        AgencyJpa agency = agencyRepository.findByNameAndDeleted(TEST_LOCALNAME, false)
+                .orElseGet(() -> {
+                    AgencyJpa created = agencyRepository.save(new AgencyJpa(
+                            "Ristorante Test",
+                            TEST_LOCALNAME,
+                            UUID.randomUUID().toString(),
+                            UUID.randomUUID().toString()
+                    ));
+                    ErrorLog.logger.info("[TestData] Creato locale '{}'", TEST_LOCALNAME);
+                    return created;
+                });
 
-        if (agencyRepository.existsByNameAndDeleted(TEST_LOCALNAME, false)) {
-            ErrorLog.logger.info("[TestData] Locale '{}' già presente, skip setup agenzia.", TEST_LOCALNAME);
-            agency = agencyRepository.findByNameAndDeleted(TEST_LOCALNAME, false).orElseThrow();
-        } else {
-            agency = agencyRepository.save(new AgencyJpa(
-                    "Ristorante Test",
-                    TEST_LOCALNAME,
-                    UUID.randomUUID().toString(),
-                    UUID.randomUUID().toString()
-            ));
-
-            User user = new User(
-                    TEST_LOCALNAME,
-                    "Admin",
-                    "Test",
-                    TEST_EMAIL,
-                    passwordEncoder.encode(TEST_PASSWORD),
-                    Role.ROLE_ADMIN,
-                    agency.getId(),
-                    "+39000000000",
-                    UUID.randomUUID().toString(),
-                    UUID.randomUUID().toString(),
-                    true
-            );
-            user.setEmailConfirmed(true);
-            userRepository.save(user);
-
-            styleUtils.saveNewStyle(new StyleDto(), agency.getId(), user.getId());
-
-            ErrorLog.logger.info("[TestData] Creato locale '{}' e utente '{}' (password: {})",
-                    TEST_LOCALNAME, TEST_EMAIL, TEST_PASSWORD);
-        }
+        userRepository.findByUsernameAndDeleted(TEST_LOCALNAME, false)
+                .or(() -> userRepository.findByEmailAndDeleted(TEST_EMAIL, false))
+                .orElseGet(() -> {
+                    User created = new User(
+                            TEST_LOCALNAME,
+                            "Admin",
+                            "Test",
+                            TEST_EMAIL,
+                            passwordEncoder.encode(TEST_PASSWORD),
+                            Role.ROLE_ADMIN,
+                            agency.getId(),
+                            "+39000000000",
+                            UUID.randomUUID().toString(),
+                            UUID.randomUUID().toString(),
+                            true
+                    );
+                    created.setEmailConfirmed(true);
+                    userRepository.save(created);
+                    if (styleRepository.findByIdAgencyAndDeleted(agency.getId(), false).isEmpty()) {
+                        styleUtils.saveNewStyle(new StyleDto(), agency.getId(), created.getId());
+                    }
+                    ErrorLog.logger.info("[TestData] Creato utente '{}' (password: {}) per locale '{}'",
+                            TEST_EMAIL, TEST_PASSWORD, TEST_LOCALNAME);
+                    return created;
+                });
 
         seedCategorie(agency.getId());
     }

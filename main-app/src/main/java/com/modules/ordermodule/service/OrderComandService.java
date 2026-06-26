@@ -174,7 +174,26 @@ public class OrderComandService {
                 pto.setNote(prod.getNote());
                 pto.setIngredientsMinus(ingredientsMinus);
                 pto.setIngredientsPlus(ingredientsPlus);
-                pto.setProductOption(product.getOptions().get(0));
+                // Risolve l'opzione: client → nome match, altrimenti default, altrimenti la prima.
+                // Prodotti senza opzioni ricevono null — niente NPE su getOptions().get(0).
+                String requested = prod.getProductOption();
+                var opts = product.getOptions();
+                com.modules.common.model.OptionInProduct chosenOpt = null;
+                if (opts != null && !opts.isEmpty()) {
+                    if (requested != null && !requested.isBlank()) {
+                        chosenOpt = opts.stream()
+                                .filter(o -> o != null && requested.equals(o.getName()))
+                                .findFirst()
+                                .orElse(null);
+                    }
+                    if (chosenOpt == null) {
+                        chosenOpt = opts.stream()
+                                .filter(o -> o != null && o.isIsDefault())
+                                .findFirst()
+                                .orElse(opts.get(0));
+                    }
+                }
+                pto.setProductOption(chosenOpt);
 
                 return pto;
             }).collect(Collectors.toList());

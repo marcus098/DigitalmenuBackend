@@ -68,9 +68,12 @@ public class PublicOrderController {
                             request.getPickupTime(),
                             request.getOrders()
                     );
-                    return ResponseEntity.status(comandId == null ? 400 : 200).body(comandId);
+                    if (comandId == null) {
+                        return ResponseEntity.status(500).body("Errore nella creazione dell'ordine asporto");
+                    }
+                    return ResponseEntity.ok(comandId);
                 })
-                .orElse(ResponseEntity.notFound().build());
+                .orElse(ResponseEntity.status(404).body("Locale non trovato"));
     }
 
     private String resolveClientIp(HttpServletRequest request) {

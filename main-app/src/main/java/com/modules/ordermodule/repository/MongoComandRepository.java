@@ -13,4 +13,6 @@ public interface MongoComandRepository extends MongoRepository<Comand, String> {
 
     List<Comand> findByTableSessionIdAndIdAgencyAndStatusIn(String sessionId, long idAgency, List<String> statuses);
 
+    /** Tutti i comand dell'agency. Usato dal TakeawaySlotService per calcolare l'occupazione degli slot. */
+    List<Comand> findByIdAgency(long idAgency);
 }

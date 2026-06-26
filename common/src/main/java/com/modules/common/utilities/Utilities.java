@@ -72,8 +72,9 @@ public class Utilities {
         str = clearString(str);
 
         List<Integer> intList = new ArrayList<>();
-        for (String s : str.split("\\|")) {
-            intList.add(Integer.parseInt(s));
+        for (String s : str.split("[|,]+")) {
+            if (s.isEmpty()) continue;
+            intList.add(Integer.parseInt(s.trim()));
         }
 
         return intList;
@@ -86,8 +87,9 @@ public class Utilities {
         str = clearString(str);
 
         List<Long> longList = new ArrayList<>();
-        for (String s : str.split("\\|")) {
-            longList.add(Long.parseLong(s));
+        for (String s : str.split("[|,]+")) {
+            if (s.isEmpty()) continue;
+            longList.add(Long.parseLong(s.trim()));
         }
 
         return longList;
@@ -100,7 +102,8 @@ public class Utilities {
         str = clearString(str);
 
         List<LongInteger> longList = new ArrayList<>();
-        for (String s : str.split("\\|")) {
+        for (String s : str.split("[|,]+")) {
+            if (s.isEmpty()) continue;
             String[] split = s.split(":");
             longList.add(new LongInteger(Long.parseLong(split[0]), Integer.parseInt(split[1])));
         }
@@ -124,13 +127,7 @@ public class Utilities {
 
 
     private String clearString(String str) {
-        if (str.charAt(0) == '|')
-            str = str.substring(1);
-
-        if (str.charAt(str.length() - 1) == '|')
-            str = str.substring(0, str.length() - 1);
-
-        return str;
+        return str.replaceAll("^[|,]+", "").replaceAll("[|,]+$", "");
     }
 
     /**
