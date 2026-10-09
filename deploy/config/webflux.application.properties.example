@@ -1,0 +1,63 @@
+# webflux-module — configurazione di PRODUZIONE (template).
+# Copia in ~/DigitalmenuFrontend/config/webflux/application.properties sul server (chmod 600).
+# Il docker-compose la monta in /config/ e la carica con SPRING_CONFIG_ADDITIONAL_LOCATION.
+# NON committare mai il file compilato.
+
+spring.application.name=webflux-module
+server.port=8081
+server.forward-headers-strategy=framework
+spring.main.web-application-type=reactive
+
+# Usate da classi che leggono @Value("postgresql.*") — host = nome del servizio docker
+postgresql.driver=postgresql
+postgresql.host=postgres
+postgresql.port=5432
+postgresql.database=digitalmenu
+postgresql.user=REPLACE_ME
+postgresql.password=REPLACE_ME
+postgresql.ssl=false
+custom.postgresql.host=postgres
+
+# Sovrascritte dal compose (SPRING_R2DBC_*)
+spring.r2dbc.url=r2dbc:postgresql://postgres:5432/digitalmenu
+spring.r2dbc.username=REPLACE_ME
+spring.r2dbc.password=REPLACE_ME
+spring.r2dbc.properties.ssl=false
+
+spring.data.mongodb.uri=mongodb://mongodb:27017/digitalmenu
+spring.data.mongodb.auto-index-creation=true
+spring.data.mongodb.mapping.auto-index-creation=true
+spring.data.mongodb.type-mapper.default-type-mapper=org.springframework.data.mongodb.core.convert.DefaultMongoTypeMapper
+
+spring.kafka.bootstrap-servers=kafka:9092
+spring.kafka.consumer.group-id=notifiche-frontend-group
+spring.kafka.listener.type=batch
+spring.kafka.consumer.max-poll-records=100
+
+spring.application.imagesPath=
+spring.application.deletedImagesPath=
+spring.application.separator=/
+bucket.images.name=
+bucket.imagesdeleted.name=
+bucket.minio.url=
+bucket.minio.accesskey=
+bucket.minio.secretkey=
+
+# DEVE essere identica a quella di main-app
+jwt.application.key=REPLACE_ME
+jwt.application.jwt_expiration=86400000
+jwt.application.jwt_expiration_check=26400000
+
+client.url=https://app.example.com
+
+spring.mail.host=smtp.gmail.com
+spring.mail.port=587
+spring.mail.username=REPLACE_ME
+spring.mail.password=REPLACE_ME
+spring.mail.properties.mail.smtp.auth=true
+spring.mail.properties.mail.smtp.starttls.enable=true
+spring.mail.properties.mail.smtp.ssl.protocols=TLSv1.2
+mail.smtp.ssl.trust=smtp.gmail.com
+
+logging.level.org.springframework.web=INFO
+logging.level.org.springframework.security=INFO

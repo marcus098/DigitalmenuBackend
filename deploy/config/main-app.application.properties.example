@@ -1,0 +1,90 @@
+# main-app — configurazione di PRODUZIONE (template).
+# Copia in ~/DigitalmenuFrontend/config/main-app/application.properties sul server (chmod 600).
+# Il docker-compose la monta in /config/ e la carica con SPRING_CONFIG_ADDITIONAL_LOCATION.
+# Le variabili d'ambiente del docker-compose (datasource, mongo, kafka, stripe, bucket, URL)
+# hanno precedenza su questo file: qui servono soprattutto le chiavi che il compose non passa.
+# NON committare mai il file compilato.
+
+spring.application.name=main-app
+server.port=8085
+# Dietro Caddy: usa X-Forwarded-* per IP reale (rate limit) e schema https
+server.forward-headers-strategy=framework
+
+spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect
+spring.jpa.show-sql=false
+spring.jpa.hibernate.ddl-auto=update
+
+# Sovrascritte dal compose (SPRING_DATASOURCE_*), lasciate per completezza
+spring.datasource.url=jdbc:postgresql://postgres:5432/digitalmenu
+spring.datasource.username=REPLACE_ME
+spring.datasource.password=REPLACE_ME
+spring.datasource.driver-class-name=org.postgresql.Driver
+jakarta.persistence.jdbc.url=jdbc:postgresql://postgres:5432/digitalmenu
+
+spring.data.mongodb.uri=mongodb://mongodb:27017/digitalmenu
+spring.data.mongodb.auto-index-creation=true
+spring.data.mongodb.mapping.auto-index-creation=true
+spring.data.mongodb.type-mapper.default-type-mapper=org.springframework.data.mongodb.core.convert.DefaultMongoTypeMapper
+
+spring.main.web-application-type=servlet
+spring.kafka.bootstrap-servers=kafka:9092
+
+spring.application.imagesPath=/images
+spring.application.deletedImagesPath=/deleted
+spring.application.separator=/
+bucket.images.name=menu
+bucket.imagesdeleted.name=menu
+bucket.filemanager.name=menu
+bucket.filemanagerdeleted.name=menu
+
+# Backblaze B2 (S3) — sovrascritte dal compose (BUCKET_S3_*)
+bucket.s3.endpoint=https://s3.eu-central-003.backblazeb2.com
+bucket.s3.region=eu-central-003
+bucket.s3.accesskey=REPLACE_ME
+bucket.s3.secretkey=REPLACE_ME
+
+# DEVE essere identica a quella di webflux (stesso JWT). Genera: openssl rand -base64 64
+jwt.application.key=REPLACE_ME
+jwt.application.jwt_expiration=86400000
+jwt.application.jwt_expiration_check=26400000
+
+# URL pubblici
+client.url=https://app.example.com
+app.frontend.url=https://app.example.com
+app.frontend-base-url=https://app.example.com
+app.public-base-url=https://api.example.com
+app.cors.allowed-origins=https://app.example.com
+
+# SMTP (Gmail: usa una "password per le app", non la password dell'account)
+spring.mail.host=smtp.gmail.com
+spring.mail.port=587
+spring.mail.username=REPLACE_ME
+spring.mail.password=REPLACE_ME
+spring.mail.properties.mail.smtp.auth=true
+spring.mail.properties.mail.smtp.starttls.enable=true
+spring.mail.properties.mail.smtp.ssl.protocols=TLSv1.2
+spring.mail.properties.mail.smtp.ssl.trust=smtp.gmail.com
+mail.smtp.ssl.trust=smtp.gmail.com
+
+spring.servlet.multipart.max-file-size=10MB
+spring.servlet.multipart.max-request-size=15MB
+
+# Stripe — sovrascritte dal compose (STRIPE_*). Vedi docs/STRIPE_SETUP.md
+stripe.secret-key=REPLACE_ME
+stripe.webhook-secret=REPLACE_ME
+stripe.connect-webhook-secret=REPLACE_ME
+stripe.connect.default-fee-bps=0
+
+twilio.enabled=false
+twilio.account-sid=
+twilio.auth-token=
+twilio.from-number=
+
+esl.ap.default-url=
+
+spring.thymeleaf.prefix=classpath:/templates/emails/
+spring.thymeleaf.suffix=.html
+spring.thymeleaf.mode=HTML
+spring.thymeleaf.cache=true
+
+logging.level.org.springframework.security=INFO
