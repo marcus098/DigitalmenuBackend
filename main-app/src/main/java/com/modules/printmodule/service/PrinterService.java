@@ -147,6 +147,12 @@ public class PrinterService {
     }
 
     public PrinterDto toDto(PrinterDoc p, String revealedToken) {
+        if (p.getType() == PrinterType.TABLET_RAWBT) {
+            // nessun dispositivo che si collega al server: niente token né URL di configurazione
+            return new PrinterDto(p.getId(), p.getName(), p.getType(), p.getMacAddress(), p.getPaperWidth(), p.charsPerLine(),
+                    p.getCategoryFilter(), p.getPrintOn(), p.getCopies(), p.isEnabled(), null, false,
+                    null, null, null, null);
+        }
         String setupUrl = p.getType() == PrinterType.ESCPOS_BRIDGE
                 ? publicBaseUrl
                 : (revealedToken != null ? cloudPrntUrl(revealedToken) : null);

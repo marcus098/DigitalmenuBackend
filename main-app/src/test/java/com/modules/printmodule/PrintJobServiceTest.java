@@ -116,4 +116,84 @@ class PrintJobServiceTest {
         assertTrue(captor.getValue().getContent().contains("C|*** RISTAMPA ***"));
         assertTrue(service.reprint("c1", 99L, null).isEmpty());
     }
+
+    private PrinterDoc tablet(String id, List<String> filter, int copies) {
+        PrinterDoc p = printer(id, PrintOn.CREATED, filter);
+        p.setType(PrinterType.TABLET_RAWBT);
+        p.setCopies(copies);
+        return p;
+    }
+
+    private static int count(byte[] haystack, byte[] needle) {
+        int n = 0;
+        outer:
+        for (int i = 0; i <= haystack.length - needle.length; i++) {
+            for (int j = 0; j < needle.length; j++) if (haystack[i + j] != needle[j]) continue outer;
+            n++;
+        }
+        return n;
+    }
+
+    @Test
+    void tabletPrintersAreNeverQueued() {
+        when(printerRepo.findEnabledByIdAgency(7L)).thenReturn(List.of(
+                printer("bridge", PrintOn.CREATED, List.of()), tablet("tab", List.of(), 1)));
+        assertEquals(1, service.enqueueForComand("c1", 7L, PrintJobService.Trigger.CREATED));
+        assertEquals(Optional.of(1), service.reprint("c1", 7L, null));
+        ArgumentCaptor<PrintJobDoc> captor = ArgumentCaptor.forClass(PrintJobDoc.class);
+        verify(jobRepo, times(2)).insert(captor.capture());
+        assertTrue(captor.getAllValues().stream().allMatch(j -> j.getPrinterId().equals("bridge")));
+
+        PrinterDoc tab = tablet("tab", List.of(), 1);
+        when(printerRepo.findByIdAndIdAgency("tab", 7L)).thenReturn(Optional.of(tab));
+        assertEquals(Optional.of(0), service.reprint("c1", 7L, "tab"));
+        assertThrows(IllegalStateException.class, () -> service.enqueueTest(tab));
+        verify(jobRepo, times(2)).insert(any());
+    }
+
+    @Test
+    void tabletTicketConcatenatesPerPrinterTicketsWithCategoryFilter() {
+        when(printerRepo.findEnabledByIdAgency(7L)).thenReturn(List.of(
+                tablet("kitchen", List.of("Pizze"), 2),
+                tablet("bar", List.of("Bevande"), 1),
+                tablet("desserts", List.of("Dolci"), 1),          // nessun prodotto → nessuno scontrino
+                printer("bridge", PrintOn.CREATED, List.of())));  // non tablet → ignorata
+
+        PrintJobService.TabletTicket t = service.tabletTicket("c1", 7L, false);
+
+        assertEquals(PrintJobService.TabletOutcome.OK, t.outcome());
+        assertEquals(2, t.tickets());
+        String text = new String(t.escPos(), java.nio.charset.StandardCharsets.US_ASCII);
+        assertEquals(2, count(t.escPos(), "2x Margherita".getBytes()));   // copie = 2
+        assertEquals(1, count(t.escPos(), "1x Birra".getBytes()));
+        assertEquals(3, count(t.escPos(), new byte[]{0x1D, 'V', 66, 0})); // 3 tagli: 2 cucina + 1 bar
+        assertTrue(text.indexOf("Margherita") < text.indexOf("Birra"));
+        assertFalse(text.contains("RISTAMPA"));
+
+        // storico: un job PRINTED per stampante, senza dedupKey
+        ArgumentCaptor<PrintJobDoc> captor = ArgumentCaptor.forClass(PrintJobDoc.class);
+        verify(jobRepo, times(2)).insert(captor.capture());
+        assertTrue(captor.getAllValues().stream().allMatch(j ->
+                j.getStatus() == PrintJobStatus.PRINTED && j.getDedupKey() == null && j.getKind() == PrintJobKind.NEW_ORDER));
+
+        PrintJobService.TabletTicket r = service.tabletTicket("c1", 7L, true);
+        assertTrue(new String(r.escPos(), java.nio.charset.StandardCharsets.US_ASCII).contains("*** RISTAMPA ***"));
+    }
+
+    @Test
+    void tabletTicketOutcomes() {
+        when(printerRepo.findEnabledByIdAgency(7L)).thenReturn(List.of(printer("bridge", PrintOn.CREATED, List.of())));
+        assertEquals(PrintJobService.TabletOutcome.NO_CONTENT, service.tabletTicket("c1", 7L, false).outcome());
+        assertEquals(PrintJobService.TabletOutcome.NOT_FOUND, service.tabletTicket("c1", 99L, false).outcome());
+
+        when(printerRepo.findEnabledByIdAgency(7L)).thenReturn(List.of(tablet("dolci", List.of("Dolci"), 1)));
+        assertEquals(PrintJobService.TabletOutcome.NO_CONTENT, service.tabletTicket("c1", 7L, false).outcome());
+
+        when(printerRepo.findEnabledByIdAgency(7L)).thenReturn(List.of(tablet("tab", List.of(), 1)));
+        comand.setStatus(ComandStatus.AWAIT_PAYMENT);
+        assertEquals(PrintJobService.TabletOutcome.CONFLICT, service.tabletTicket("c1", 7L, false).outcome());
+        comand.setStatus(ComandStatus.DELETED);
+        assertEquals(PrintJobService.TabletOutcome.CONFLICT, service.tabletTicket("c1", 7L, false).outcome());
+        verify(jobRepo, never()).insert(any());
+    }
 }

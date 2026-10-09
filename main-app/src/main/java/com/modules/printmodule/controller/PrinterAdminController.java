@@ -7,6 +7,7 @@ import com.modules.printmodule.model.PrintJobDoc;
 import com.modules.printmodule.service.PrintJobService;
 import com.modules.printmodule.service.PrinterService;
 import com.modules.servletconfiguration.security.AuthenticatedUserProvider;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -22,9 +23,11 @@ import java.util.Map;
  *   PUT    /api/printers/{id}                    → modifica
  *   DELETE /api/printers/{id}                    → elimina (e i suoi job)
  *   POST   /api/printers/{id}/regenerate-token   → nuovo deviceToken (il vecchio smette di funzionare)
- *   POST   /api/printers/{id}/test               → accoda scontrino di prova
+ *   POST   /api/printers/{id}/test               → accoda scontrino di prova (409 per TABLET_RAWBT)
  *   GET    /api/printers/{id}/jobs?limit=20      → ultimi job con stato
- *   POST   /api/printers/reprint/{comandId}?printerId=  → ristampa (default: tutte le stampanti pertinenti)
+ *   POST   /api/printers/reprint/{comandId}?printerId=  → ristampa in coda (ADMIN e WAITER; esclude le stampanti tablet)
+ *
+ * Stampa dal tablet (RawBT): vedi TabletPrintController.
  */
 @RestController
 @CrossOrigin(origins = "*")
@@ -89,6 +92,8 @@ public class PrinterAdminController {
     public ResponseEntity<PrintJobDto> test(@PathVariable("id") String id) {
         return printerService.find(auth.getAgencyId(), id)
                 .map(p -> {
+                    // le stampanti tablet non hanno coda: la prova si fa con GET /api/printers/{id}/tablet-test
+                    if (!PrintJobService.isQueued(p)) return ResponseEntity.status(HttpStatus.CONFLICT).<PrintJobDto>build();
                     PrintJobDoc job = printJobService.enqueueTest(p);
                     return ResponseEntity.ok(PrintJobService.toDto(job, p));
                 })
@@ -104,7 +109,7 @@ public class PrinterAdminController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    @PreAuthorize("hasRole('ROLE_ADMIN')")
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
     @PostMapping("/api/printers/reprint/{comandId}")
     public ResponseEntity<Map<String, Integer>> reprint(@PathVariable("comandId") String comandId,
                                                         @RequestParam(value = "printerId", required = false) String printerId) {

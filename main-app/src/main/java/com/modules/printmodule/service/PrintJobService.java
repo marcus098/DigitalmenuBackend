@@ -6,6 +6,7 @@ import com.modules.ordermodule.model.ComandJpa;
 import com.modules.ordermodule.repository.MongoComandReadRepository;
 import com.modules.printmodule.dto.PrintJobDto;
 import com.modules.printmodule.model.*;
+import com.modules.printmodule.render.PrinterEncoder;
 import com.modules.printmodule.render.TicketData;
 import com.modules.printmodule.render.TicketRenderer;
 import com.modules.printmodule.repository.PrintJobRepository;
@@ -14,6 +15,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.io.ByteArrayOutputStream;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -58,6 +60,7 @@ public class PrintJobService {
         if (comand.getStatus() == ComandStatus.DELETED) return 0;
 
         List<PrinterDoc> printers = printerRepository.findEnabledByIdAgency(idAgency).stream()
+                .filter(PrintJobService::isQueued)
                 .filter(p -> shouldPrint(p.getPrintOn(), trigger, comand.getStatus()))
                 .toList();
         if (printers.isEmpty()) return 0;
@@ -81,7 +84,15 @@ public class PrintJobService {
         return rule == PrintOn.ACCEPTED;
     }
 
-    /** Ristampa manuale dalla dashboard: printerId null = tutte le stampanti abilitate che hanno prodotti della comanda. */
+    /** Le stampanti TABLET_RAWBT non hanno coda: stampano solo dal browser del tablet (vedi tabletTicket). */
+    public static boolean isQueued(PrinterDoc p) {
+        return p.getType() != PrinterType.TABLET_RAWBT;
+    }
+
+    /**
+     * Ristampa manuale dalla dashboard: printerId null = tutte le stampanti abilitate (con coda) che hanno prodotti
+     * della comanda. Le stampanti tablet sono escluse (la ristampa tablet passa da tabletTicket con reprint=true).
+     */
     public Optional<Integer> reprint(String comandId, long idAgency, String printerId) {
         Optional<ComandJpa> opt = comandRepository.findById(comandId);
         if (opt.isEmpty() || opt.get().getIdAgency() == null || opt.get().getIdAgency() != idAgency) return Optional.empty();
@@ -90,10 +101,11 @@ public class PrintJobService {
         if (printerId != null && !printerId.isBlank()) {
             Optional<PrinterDoc> p = printerRepository.findByIdAndIdAgency(printerId, idAgency);
             if (p.isEmpty()) return Optional.empty();
-            printers = List.of(p.get());
+            printers = isQueued(p.get()) ? List.of(p.get()) : List.of();
         } else {
-            printers = printerRepository.findEnabledByIdAgency(idAgency);
+            printers = printerRepository.findEnabledByIdAgency(idAgency).stream().filter(PrintJobService::isQueued).toList();
         }
+        if (printers.isEmpty()) return Optional.of(0);
 
         TicketFactory.ComandContext ctx = ticketFactory.context(opt.get());
         int count = 0;
@@ -105,11 +117,90 @@ public class PrintJobService {
         return Optional.of(count);
     }
 
+    /** @throws IllegalStateException per le stampanti TABLET_RAWBT (nessuna coda: usare tabletTest). */
     public PrintJobDoc enqueueTest(PrinterDoc printer) {
-        List<String> lines = TicketRenderer.renderTest(ticketFactory.restaurantName(printer.getIdAgency()),
-                printer.getName(), printer.charsPerLine(), LocalDateTime.now());
-        PrintJobDoc job = newJob(printer, null, PrintJobKind.TEST, lines);
+        if (!isQueued(printer)) throw new IllegalStateException("Stampante tablet: nessuna coda");
+        PrintJobDoc job = newJob(printer, null, PrintJobKind.TEST, testLines(printer));
         return jobRepository.insert(job);
+    }
+
+    private List<String> testLines(PrinterDoc printer) {
+        return TicketRenderer.renderTest(ticketFactory.restaurantName(printer.getIdAgency()),
+                printer.getName(), printer.charsPerLine(), LocalDateTime.now());
+    }
+
+    // ── Stampa dal tablet (RawBT) ────────────────────────────────────────────
+
+    public enum TabletOutcome { OK, NOT_FOUND, CONFLICT, NO_CONTENT }
+
+    /** escPos = concatenazione degli scontrini di tutte le stampanti tablet (copie incluse); tickets = n. stampanti coinvolte. */
+    public record TabletTicket(TabletOutcome outcome, byte[] escPos, int tickets) {
+        static TabletTicket of(TabletOutcome o) { return new TabletTicket(o, null, 0); }
+    }
+
+    public List<PrinterDoc> tabletPrinters(long idAgency) {
+        return printerRepository.findEnabledByIdAgency(idAgency).stream()
+                .filter(p -> p.getType() == PrinterType.TABLET_RAWBT).toList();
+    }
+
+    public boolean hasQueuedPrinters(long idAgency) {
+        return printerRepository.findEnabledByIdAgency(idAgency).stream().anyMatch(PrintJobService::isQueued);
+    }
+
+    /**
+     * Payload ESC/POS unico per RawBT: un tablet invia a una sola stampante fisica, quindi gli scontrini delle varie
+     * stampanti tablet "logiche" (es. cucina / bar con filtri categoria diversi) escono uno dopo l'altro, ognuno col suo taglio.
+     * Ogni scontrino generato viene registrato nello storico come job PRINTED (mai preso dai trasporti, che leggono solo
+     * PENDING/SENT).
+     */
+    public TabletTicket tabletTicket(String comandId, long idAgency, boolean reprint) {
+        Optional<ComandJpa> opt = comandRepository.findById(comandId);
+        if (opt.isEmpty() || opt.get().getIdAgency() == null || opt.get().getIdAgency() != idAgency) {
+            return TabletTicket.of(TabletOutcome.NOT_FOUND);
+        }
+        ComandJpa comand = opt.get();
+        if (comand.getStatus() == ComandStatus.DELETED || comand.getStatus() == ComandStatus.AWAIT_PAYMENT) {
+            return TabletTicket.of(TabletOutcome.CONFLICT);
+        }
+        List<PrinterDoc> printers = tabletPrinters(idAgency);
+        if (printers.isEmpty()) return TabletTicket.of(TabletOutcome.NO_CONTENT);
+
+        TicketFactory.ComandContext ctx = ticketFactory.context(comand);
+        PrintJobKind kind = reprint ? PrintJobKind.REPRINT : PrintJobKind.NEW_ORDER;
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        int count = 0;
+        for (PrinterDoc p : printers) {
+            Optional<TicketData> ticket = ticketFactory.ticket(ctx, p, reprint ? "RISTAMPA" : null);
+            if (ticket.isEmpty()) continue;
+            List<String> lines = TicketRenderer.render(ticket.get(), p.charsPerLine());
+            out.writeBytes(PrinterEncoder.escPos(lines, Math.max(1, p.getCopies())));
+            recordTabletJob(p, comandId, kind, lines);
+            count++;
+        }
+        if (count == 0) return TabletTicket.of(TabletOutcome.NO_CONTENT);
+        return new TabletTicket(TabletOutcome.OK, out.toByteArray(), count);
+    }
+
+    /** Scontrino di prova per una stampante tablet (ESC/POS da passare a RawBT). */
+    public byte[] tabletTest(PrinterDoc printer) {
+        List<String> lines = testLines(printer);
+        recordTabletJob(printer, null, PrintJobKind.TEST, lines);
+        return PrinterEncoder.escPos(lines, 1);
+    }
+
+    /** Storico: job già PRINTED (inviato al tablet). Nessun dedupKey: la stessa comanda può essere stampata più volte. */
+    private void recordTabletJob(PrinterDoc printer, String comandId, PrintJobKind kind, List<String> lines) {
+        try {
+            PrintJobDoc job = newJob(printer, comandId, kind, lines);
+            Instant now = Instant.now();
+            job.setDedupKey(null);
+            job.setStatus(PrintJobStatus.PRINTED);
+            job.setSentAt(now);
+            job.setPrintedAt(now);
+            jobRepository.insert(job);
+        } catch (Exception e) {
+            ErrorLog.logger.warn("Stampa tablet: storico non registrato per " + printer.getId() + ": " + e.getMessage());
+        }
     }
 
     /** @return false se il NEW_ORDER era già stato accodato (idempotenza via indice unique su dedupKey). */
