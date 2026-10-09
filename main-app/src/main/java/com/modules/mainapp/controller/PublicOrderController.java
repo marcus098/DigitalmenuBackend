@@ -3,6 +3,7 @@ package com.modules.mainapp.controller;
 import com.modules.authmodule.repository.UserRepository;
 import com.modules.mainapp.config.IpRateLimiter;
 import com.modules.mainapp.request.PublicTakeawayRequest;
+import com.modules.ordermodule.exception.OrderRejectedException;
 import com.modules.ordermodule.request.AddComandClient;
 import com.modules.ordermodule.service.OrderComandService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -38,8 +39,12 @@ public class PublicOrderController {
             return ResponseEntity.status(400).body("Payload non valido");
         }
 
-        String comandId = orderComandService.addOrderFromClient(request);
-        return ResponseEntity.status(comandId == null ? 400 : 200).body(comandId);
+        try {
+            String comandId = orderComandService.addOrderFromClient(request);
+            return ResponseEntity.status(comandId == null ? 500 : 200).body(comandId);
+        } catch (OrderRejectedException e) {
+            return ResponseEntity.status(e.getStatus()).body(e.getMessage());
+        }
     }
 
     @PostMapping("/orders/takeaway/{localname}")
@@ -61,13 +66,18 @@ public class PublicOrderController {
 
         return userRepository.findByUsernameAndDeleted(localname, false)
                 .map(user -> {
-                    String comandId = orderComandService.addPublicTakeaway(
-                            user.getIdAgency(),
-                            request.getCustomerName(),
-                            request.getCustomerPhone(),
-                            request.getPickupTime(),
-                            request.getOrders()
-                    );
+                    String comandId;
+                    try {
+                        comandId = orderComandService.addPublicTakeaway(
+                                user.getIdAgency(),
+                                request.getCustomerName(),
+                                request.getCustomerPhone(),
+                                request.getPickupTime(),
+                                request.getOrders()
+                        );
+                    } catch (OrderRejectedException e) {
+                        return ResponseEntity.status(e.getStatus()).body(e.getMessage());
+                    }
                     if (comandId == null) {
                         return ResponseEntity.status(500).body("Errore nella creazione dell'ordine asporto");
                     }
@@ -76,11 +86,11 @@ public class PublicOrderController {
                 .orElse(ResponseEntity.status(404).body("Locale non trovato"));
     }
 
+    /**
+     * X-Forwarded-For è impostabile dal client: non lo leggiamo direttamente. Dietro proxy,
+     * server.forward-headers-strategy fa sì che getRemoteAddr() restituisca già l'IP reale.
+     */
     private String resolveClientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(",")[0].trim();
-        }
         return request.getRemoteAddr();
     }
 }

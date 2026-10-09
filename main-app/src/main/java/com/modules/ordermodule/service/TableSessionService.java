@@ -9,7 +9,7 @@ import com.modules.common.model.Order;
 import com.modules.common.model.enums.ComandStatus;
 import com.modules.common.model.enums.ComandWaiterType;
 import com.modules.common.model.enums.SessionStatus;
-import com.modules.ordermodule.kafka.OrderUpdateProducer;
+import com.modules.mainapp.config.IpRateLimiter;
 import com.modules.ordermodule.kafka.TableSessionUpdateProducer;
 import com.modules.ordermodule.model.ComandFromWaiterJpa;
 import com.modules.ordermodule.model.TableSessionJpa;
@@ -19,8 +19,19 @@ import com.modules.ordermodule.request.AddComandOrder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.index.Index;
+import org.springframework.data.mongodb.core.index.PartialIndexFilter;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -30,6 +41,12 @@ import java.util.*;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+/*
+ * NB: niente @Transactional. MongoDB è standalone (non replica set, nessun MongoTransactionManager):
+ * le annotazioni aprivano solo una transazione JPA che non proteggeva le scritture Mongo.
+ * La concorrenza è gestita da: indice unico parziale (tableId, status=OPEN) per openSession e
+ * blocchi synchronized per-sessione (validi solo su singola istanza) per join/ready/submit.
+ */
 @Service
 public class TableSessionService {
 
@@ -38,6 +55,9 @@ public class TableSessionService {
     private static final String ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final Pattern CODE_PATTERN = Pattern.compile("^[A-Z0-9]{4}$");
+    private static final int JOIN_MAX_ATTEMPTS = 10;
+    private static final long JOIN_WINDOW_MS = 5 * 60 * 1000L;
+    static final String OPEN_SESSION_INDEX = "uniq_open_session_per_table";
 
     @Autowired
     private TableSessionRepository tableSessionRepository;
@@ -50,21 +70,39 @@ public class TableSessionService {
     @Autowired
     private TableSessionUpdateProducer tableSessionUpdateProducer;
     @Autowired
-    private OrderUpdateProducer orderUpdateProducer;
-    @Autowired
     private UserRepository userRepository;
+    @Autowired
+    private IpRateLimiter rateLimiter;
+    @Autowired
+    private MongoTemplate mongoTemplate;
+
+    /** Garantisce al massimo UNA sessione OPEN per tavolo, anche con più istanze/richieste concorrenti. */
+    @EventListener(ApplicationReadyEvent.class)
+    public void ensureOpenSessionIndex() {
+        try {
+            mongoTemplate.indexOps(TableSessionJpa.class).ensureIndex(new Index()
+                    // (tableId, status) e non solo tableId: evita conflitti con l'indice @Indexed già esistente su tableId
+                    .on("tableId", Sort.Direction.ASC)
+                    .on("status", Sort.Direction.ASC)
+                    .unique()
+                    .partial(PartialIndexFilter.of(Criteria.where("status").is(SessionStatus.OPEN.name())))
+                    .named(OPEN_SESSION_INDEX));
+        } catch (Exception e) {
+            // es. sessioni OPEN duplicate già presenti: va sistemato a mano, ma non blocchiamo l'avvio
+            ErrorLog.logger.error("Impossibile creare l'indice " + OPEN_SESSION_INDEX + " su table_sessions", e);
+        }
+    }
 
     // =====================================================================
     // ============================= LOOKUP ================================
     // =====================================================================
 
     public Map<String, Object> getPublicTableInfo(long tableId, String localname) {
-        Optional<TableDto> tableOpt = tableUtils.findById(tableId);
+        Long agencyId = resolveAgencyByLocalname(localname);
+        if (agencyId == null) return null;
+        Optional<TableDto> tableOpt = tableUtils.findByIdAndIdAgencyAndDeleted(tableId, agencyId);
         if (tableOpt.isEmpty()) return null;
         TableDto table = tableOpt.get();
-
-        Long agencyId = resolveAgencyByLocalname(localname);
-        if (agencyId == null || !agencyId.equals(table.getIdAgency())) return null;
 
         Map<String, Object> resp = new LinkedHashMap<>();
         resp.put("tableId", table.getId());
@@ -82,6 +120,8 @@ public class TableSessionService {
         resp.put("seats", session.getSeats());
         resp.put("joinable", session.getClients().size() < session.getSeats());
         resp.put("connectedCount", session.getClients().size());
+        // Il FE usa sessionId per verificare se la sessione salvata in locale è ancora quella attiva.
+        // Conoscere il sessionId non basta: state/ready/submit richiedono un clientSessionId che abbia fatto join.
         resp.put("sessionId", session.getId());
         return resp;
     }
@@ -90,22 +130,21 @@ public class TableSessionService {
     // ============================== JOIN =================================
     // =====================================================================
 
-    @Transactional
     public Map<String, Object> join(long tableId, String code, String localname, String clientSessionId) {
         if (clientSessionId == null || clientSessionId.isBlank()) {
             return errorResp(400, "INVALID_PAYLOAD");
         }
+        // Anti brute-force del codice a 4 caratteri: max 10 tentativi / 5 minuti per IP+tavolo.
+        if (!rateLimiter.isAllowed("join:" + currentClientIp() + ":" + tableId, JOIN_MAX_ATTEMPTS, JOIN_WINDOW_MS)) {
+            return errorResp(429, "TOO_MANY_ATTEMPTS");
+        }
         if (code == null || !CODE_PATTERN.matcher(code.toUpperCase(Locale.ROOT)).matches()) {
             return errorResp(401, "INVALID_CODE");
         }
-        Optional<TableDto> tableOpt = tableUtils.findById(tableId);
-        if (tableOpt.isEmpty()) return errorResp(404, "TABLE_NOT_FOUND");
-        TableDto table = tableOpt.get();
-
         Long agencyId = resolveAgencyByLocalname(localname);
-        if (agencyId == null || !agencyId.equals(table.getIdAgency())) {
-            return errorResp(404, "TABLE_NOT_FOUND");
-        }
+        if (agencyId == null) return errorResp(404, "TABLE_NOT_FOUND");
+        Optional<TableDto> tableOpt = tableUtils.findByIdAndIdAgencyAndDeleted(tableId, agencyId);
+        if (tableOpt.isEmpty()) return errorResp(404, "TABLE_NOT_FOUND");
 
         Optional<TableSessionJpa> sessionOpt = tableSessionRepository
                 .findByTableIdAndStatus(tableId, SessionStatus.OPEN);
@@ -150,6 +189,9 @@ public class TableSessionService {
     public Map<String, Object> getState(String sessionId, String clientSessionId) {
         Optional<TableSessionJpa> opt = tableSessionRepository.findById(sessionId);
         if (opt.isEmpty()) return null;
+        if (clientSessionId == null || clientSessionId.isBlank() || findClient(opt.get(), clientSessionId) == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "NOT_JOINED");
+        }
         return buildStateResponse(opt.get(), clientSessionId, false);
     }
 
@@ -170,9 +212,9 @@ public class TableSessionService {
     // ============================ READY ==================================
     // =====================================================================
 
-    @Transactional
     public Map<String, Object> setReady(String sessionId, String clientSessionId, List<AddComandOrder> draftOrder) {
         if (clientSessionId == null || clientSessionId.isBlank()) return errorResp(400, "INVALID_PAYLOAD");
+        if (!validDraftQuantities(draftOrder)) return errorResp(400, "INVALID_QUANTITY");
         Optional<TableSessionJpa> opt = tableSessionRepository.findById(sessionId);
         if (opt.isEmpty()) return errorResp(404, "SESSION_NOT_FOUND");
 
@@ -192,7 +234,6 @@ public class TableSessionService {
         }
     }
 
-    @Transactional
     public Map<String, Object> setNotReady(String sessionId, String clientSessionId) {
         if (clientSessionId == null || clientSessionId.isBlank()) return errorResp(400, "INVALID_PAYLOAD");
         synchronized (sessionId.intern()) {
@@ -213,19 +254,18 @@ public class TableSessionService {
     // ============================ SUBMIT =================================
     // =====================================================================
 
-    @Transactional
     public Map<String, Object> submit(String sessionId, String clientSessionId) {
         synchronized (sessionId.intern()) {
             Optional<TableSessionJpa> opt = tableSessionRepository.findById(sessionId);
             if (opt.isEmpty()) return errorResp(404, "SESSION_NOT_FOUND");
             TableSessionJpa session = opt.get();
+            if (clientSessionId == null || findClient(session, clientSessionId) == null) return errorResp(403, "NOT_JOINED");
             if (session.getStatus() == SessionStatus.SUBMITTED) return errorResp(409, "ALREADY_SUBMITTED");
             if (session.getStatus() != SessionStatus.OPEN) return errorResp(409, "NOT_SUBMITTABLE");
             return doSubmit(session, false);
         }
     }
 
-    @Transactional
     public Map<String, Object> forceSubmit(long tableId) {
         Optional<TableSessionJpa> opt = tableSessionRepository
                 .findByTableIdAndStatus(tableId, SessionStatus.OPEN);
@@ -288,14 +328,7 @@ public class TableSessionService {
         comand.setComandWaiterType(ComandWaiterType.TABLE);
         comand.setClientSessionId(clientSessionId);
         Comand saved = mongoComandRepository.save(comand);
-
-        try {
-            String json = String.format("{\"id\":\"%s\",\"status\":\"%s\",\"idAgency\":%d}",
-                    saved.getId(), ComandStatus.AWAIT.toString(), idAgency);
-            orderUpdateProducer.sendUpdate(json);
-        } catch (Exception e) {
-            ErrorLog.logger.error("Errore invio kafka order event", e);
-        }
+        orderComandService.notifyComandCreated(saved);
         return saved.getId();
     }
 
@@ -320,7 +353,6 @@ public class TableSessionService {
     // ===================== WAITER OPEN / SEATS / CLOSE ===================
     // =====================================================================
 
-    @Transactional
     public Map<String, Object> openSession(long tableId, long idAgency, int seats) {
         if (seats < 1) return errorResp(400, "INVALID_SEATS");
         Optional<TableDto> tOpt = tableUtils.findByIdAndIdAgencyAndDeleted(tableId, idAgency);
@@ -344,7 +376,21 @@ public class TableSessionService {
         session.setSeats(seats);
         session.setStatus(SessionStatus.OPEN);
         session.setCreatedAt(OffsetDateTime.now());
-        tableSessionRepository.save(session);
+        try {
+            // insert (non save): con l'indice unico parziale una seconda OPEN sullo stesso tavolo fallisce
+            tableSessionRepository.insert(session);
+        } catch (DuplicateKeyException e) {
+            // apertura concorrente: restituiamo la sessione già aperta
+            Optional<TableSessionJpa> winner = tableSessionRepository.findByTableIdAndStatus(tableId, SessionStatus.OPEN);
+            if (winner.isEmpty() || winner.get().getIdAgency() != idAgency) return errorResp(409, "TABLE_ALREADY_OPEN");
+            TableSessionJpa w = winner.get();
+            Map<String, Object> resp = new LinkedHashMap<>();
+            resp.put("sessionId", w.getId());
+            resp.put("accessCode", w.getAccessCode());
+            resp.put("seats", w.getSeats());
+            resp.put("tableId", tableId);
+            return resp;
+        }
 
         table.setBusy(true);
         table.setSeats(seats);
@@ -364,7 +410,6 @@ public class TableSessionService {
         return resp;
     }
 
-    @Transactional
     public Map<String, Object> updateSeats(long tableId, long idAgency, int seats) {
         if (seats < 1) return errorResp(400, "INVALID_SEATS");
         Optional<TableSessionJpa> opt = tableSessionRepository
@@ -386,7 +431,6 @@ public class TableSessionService {
         }
     }
 
-    @Transactional
     public Map<String, Object> closeSession(long tableId, long idAgency) {
         Optional<TableSessionJpa> opt = tableSessionRepository
                 .findByTableIdAndStatus(tableId, SessionStatus.OPEN);
@@ -451,6 +495,26 @@ public class TableSessionService {
         } catch (Exception e) {
             ErrorLog.logger.error("Errore emit kafka table-session-updated sessionId=" + sessionId, e);
         }
+    }
+
+    private static String currentClientIp() {
+        // remoteAddr (non X-Forwarded-For, che è controllabile dal client): dietro proxy ci pensa forward-headers-strategy
+        if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attrs) {
+            return attrs.getRequest().getRemoteAddr();
+        }
+        return "unknown";
+    }
+
+    private static boolean validDraftQuantities(List<AddComandOrder> draftOrder) {
+        if (draftOrder == null) return true;
+        for (AddComandOrder o : draftOrder) {
+            if (o == null || o.getProducts() == null) return false;
+            for (var p : o.getProducts()) {
+                if (p == null || p.getQuantity() < OrderComandService.MIN_QUANTITY
+                        || p.getQuantity() > OrderComandService.MAX_QUANTITY) return false;
+            }
+        }
+        return true;
     }
 
     private Long resolveAgencyByLocalname(String localname) {

@@ -6,7 +6,11 @@ import java.util.List;
 public class AddComandClient {
     private long tableId;
     private String clientSessionId;
+    private String localname;
     private List<AddComandOrder> orders = new ArrayList<>();
+
+    public String getLocalname() { return localname; }
+    public void setLocalname(String localname) { this.localname = localname; }
 
     public long getTableId() { return tableId; }
     public void setTableId(long tableId) { this.tableId = tableId; }

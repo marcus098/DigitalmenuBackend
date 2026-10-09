@@ -3,14 +3,24 @@ package com.modules.takeawaymodule.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.modules.common.logs.errorlog.ErrorLog;
-import com.modules.ordermodule.repository.MongoComandRepository;
+import com.modules.common.model.enums.ComandStatus;
+import com.modules.common.model.enums.ComandWaiterType;
+import com.modules.ordermodule.exception.OrderRejectedException;
+import com.modules.ordermodule.model.ComandJpa;
 import com.modules.takeawaymodule.dto.SlotConfigDto;
 import com.modules.takeawaymodule.dto.SlotDto;
 import com.modules.takeawaymodule.model.TakeawaySlotConfigJpa;
+import com.modules.takeawaymodule.model.TakeawaySlotCounter;
 import com.modules.takeawaymodule.model.TakeawaySlotOverrideJpa;
 import com.modules.takeawaymodule.repository.TakeawaySlotConfigRepository;
 import com.modules.takeawaymodule.repository.TakeawaySlotOverrideRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,7 +36,14 @@ public class TakeawaySlotService {
 
     @Autowired private TakeawaySlotConfigRepository configRepo;
     @Autowired private TakeawaySlotOverrideRepository overrideRepo;
-    @Autowired private MongoComandRepository comandRepo;
+    @Autowired private MongoTemplate mongoTemplate;
+
+    /** Identifica uno slot prenotato (agency, giorno, orario di inizio slot). */
+    public record SlotKey(long idAgency, LocalDate date, LocalTime time) {
+        public String id() {
+            return idAgency + "|" + date + "|" + time.format(HHMM);
+        }
+    }
 
     // ── Config ───────────────────────────────────────────────────────────────
 
@@ -173,14 +190,156 @@ public class TakeawaySlotService {
         return result;
     }
 
+    // ── Prenotazione slot (race-safe) ────────────────────────────────────────
+
+    /**
+     * Valida l'orario di ritiro di un ordine asporto pubblico ("yyyy-MM-ddTHH:mm") e prenota
+     * atomicamente un posto nello slot. Lancia {@link OrderRejectedException} (409) se lo slot non esiste,
+     * è chiuso, è passato o è pieno; (400) se l'orario è mancante/non valido.
+     * In caso di fallimento successivo del salvataggio dell'ordine chiamare {@link #releaseSlot}.
+     */
+    public SlotKey reservePublicSlot(long idAgency, String pickupTime, int products) {
+        if (pickupTime == null || pickupTime.isBlank()) {
+            throw new OrderRejectedException(400, "Orario di ritiro mancante");
+        }
+        LocalDateTime pickup;
+        try {
+            pickup = LocalDateTime.parse(pickupTime.length() > 16 ? pickupTime.substring(0, 16) : pickupTime);
+        } catch (Exception e) {
+            throw new OrderRejectedException(400, "Orario di ritiro non valido");
+        }
+        if (pickup.isBefore(LocalDateTime.now())) {
+            throw new OrderRejectedException(409, "L'orario di ritiro selezionato è già passato, scegline un altro");
+        }
+        LocalDate date = pickup.toLocalDate();
+        String hhmm = pickup.toLocalTime().format(HHMM);
+        TakeawaySlotConfigJpa cfg = configRepo.findByIdAgency(idAgency).orElseGet(() -> seedDefault(idAgency));
+
+        SlotDto slot = computeSlots(idAgency, date, true).stream()
+                .filter(s -> hhmm.equals(s.getTime()))
+                .findFirst()
+                .orElseThrow(() -> new OrderRejectedException(409, "L'orario di ritiro selezionato non è disponibile"));
+        switch (slot.getStatus()) {
+            case CLOSED -> throw new OrderRejectedException(409, "Lo slot di ritiro selezionato è chiuso, scegline un altro");
+            case PAST -> throw new OrderRejectedException(409, "L'orario di ritiro selezionato è già passato, scegline un altro");
+            case FULL -> throw new OrderRejectedException(409, "Lo slot di ritiro selezionato è pieno, scegline un altro");
+            default -> { }
+        }
+
+        SlotKey key = new SlotKey(idAgency, date, LocalTime.parse(hhmm, HHMM));
+        ensureCounter(key, cfg.getSlotDurationMinutes());
+
+        // Capacità residua al netto degli ordini manuali della dashboard.
+        int maxOnlineOrders = slot.getMaxOrders() - slot.getManualOrders();
+        int maxOnlineProductsBefore = slot.getMaxProducts() - slot.getManualProducts() - products;
+        Query q = new Query(Criteria.where("_id").is(key.id())
+                .and("orders").lt(maxOnlineOrders)
+                .and("products").lte(maxOnlineProductsBefore));
+        Update u = new Update().inc("orders", 1).inc("products", products);
+        TakeawaySlotCounter updated = mongoTemplate.findAndModify(q, u,
+                FindAndModifyOptions.options().returnNew(true), TakeawaySlotCounter.class);
+        if (updated == null) {
+            throw new OrderRejectedException(409, "Lo slot di ritiro selezionato non ha più capacità sufficiente, scegline un altro");
+        }
+        return key;
+    }
+
+    /**
+     * Registra (senza controllo capacità) un ordine asporto creato dal cameriere nello slot corrispondente,
+     * così il contatore resta allineato. Ritorna null se l'orario non è interpretabile.
+     */
+    public SlotKey consumeSlot(long idAgency, String time, int products) {
+        try {
+            LocalDateTime pickup = parsePickup(time, LocalDate.now());
+            if (pickup == null) return null;
+            TakeawaySlotConfigJpa cfg = configRepo.findByIdAgency(idAgency).orElseGet(() -> seedDefault(idAgency));
+            SlotKey key = new SlotKey(idAgency, pickup.toLocalDate(),
+                    snapToSlotStart(pickup.toLocalTime(), cfg.getSlotDurationMinutes()));
+            ensureCounter(key, cfg.getSlotDurationMinutes());
+            mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(key.id())),
+                    new Update().inc("orders", 1).inc("products", products), TakeawaySlotCounter.class);
+            return key;
+        } catch (Exception e) {
+            ErrorLog.logger.error("Errore registrazione slot asporto idAgency=" + idAgency + " time=" + time, e);
+            return null;
+        }
+    }
+
+    /** Libera un posto nello slot (ordine non salvato o comanda DELETED). No-op se il contatore non esiste. */
+    public void releaseSlot(SlotKey key, int products) {
+        if (key == null) return;
+        try {
+            mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(key.id()).and("orders").gte(1)),
+                    new Update().inc("orders", -1).inc("products", -products), TakeawaySlotCounter.class);
+            mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(key.id()).and("products").lt(0)),
+                    new Update().set("products", 0), TakeawaySlotCounter.class);
+        } catch (Exception e) {
+            ErrorLog.logger.error("Errore rilascio slot asporto " + key.id(), e);
+        }
+    }
+
+    /**
+     * Allinea il contatore dello slot a un cambio di stato di una comanda asporto:
+     * →DELETED libera il posto, DELETED→altro lo rioccupa (senza controllo capacità: è un'azione dello staff).
+     * COMPLETED continua a occupare lo slot: la capacità rappresenta i ritiri pianificati nella finestra.
+     */
+    public void onTakeawayStatusChanged(long idAgency, String time, LocalDateTime createdAt, int products,
+                                        ComandStatus oldStatus, ComandStatus newStatus) {
+        if (oldStatus == newStatus) return;
+        boolean toDeleted = newStatus == ComandStatus.DELETED;
+        boolean fromDeleted = oldStatus == ComandStatus.DELETED;
+        if (!toDeleted && !fromDeleted) return;
+        try {
+            LocalDateTime pickup = parsePickup(time, createdAt != null ? createdAt.toLocalDate() : LocalDate.now());
+            if (pickup == null) return;
+            TakeawaySlotConfigJpa cfg = configRepo.findByIdAgency(idAgency).orElseGet(() -> seedDefault(idAgency));
+            SlotKey key = new SlotKey(idAgency, pickup.toLocalDate(),
+                    snapToSlotStart(pickup.toLocalTime(), cfg.getSlotDurationMinutes()));
+            if (toDeleted) {
+                releaseSlot(key, products);
+            } else {
+                // solo se il contatore esiste già: altrimenti verrà inizializzato dal conteggio live
+                mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(key.id())),
+                        new Update().inc("orders", 1).inc("products", products), TakeawaySlotCounter.class);
+            }
+        } catch (Exception e) {
+            ErrorLog.logger.error("Errore aggiornamento slot asporto per cambio stato", e);
+        }
+    }
+
+    /** Crea il contatore dello slot inizializzandolo dal conteggio live (ordini già esistenti), se assente. */
+    private void ensureCounter(SlotKey key, int duration) {
+        if (mongoTemplate.exists(new Query(Criteria.where("_id").is(key.id())), TakeawaySlotCounter.class)) return;
+        int[] live = countLiveOrdersBySlot(key.idAgency(), key.date(), duration)
+                .getOrDefault(key.time(), new int[]{0, 0});
+        try {
+            mongoTemplate.insert(new TakeawaySlotCounter(key.id(), key.idAgency(), key.date().toString(),
+                    key.time().format(HHMM), live[0], live[1]));
+        } catch (DuplicateKeyException ignored) {
+            // creato in parallelo da un'altra richiesta/istanza: va bene così
+        }
+    }
+
+    /**
+     * Occupazione degli slot di un giorno dai comand Mongo: solo TAKE_AWAY dell'agency, non DELETED,
+     * con ritiro nel giorno richiesto (ISO "yyyy-MM-ddTHH:mm", oppure "HH:mm" creato in quel giorno).
+     * I COMPLETED restano conteggiati: la capacità rappresenta i ritiri pianificati nello slot.
+     */
     private Map<LocalTime, int[]> countLiveOrdersBySlot(long idAgency, LocalDate date, int duration) {
         Map<LocalTime, int[]> map = new HashMap<>();
         try {
-            // Tutti i comand dell'agency, filtriamo i takeaway con pickup parseabile sul giorno target.
-            comandRepo.findByIdAgency(idAgency).forEach(c -> {
-                if (!(c instanceof com.modules.common.model.ComandFromWaiter cfw)) return;
-                if (cfw.getComandWaiterType() != com.modules.common.model.enums.ComandWaiterType.TAKE_AWAY) return;
-                LocalDateTime pickup = parsePickup(cfw.getTime(), date);
+            Criteria isoOnDay = Criteria.where("time").regex("^" + date + "T");
+            Criteria hhmmCreatedOnDay = new Criteria().andOperator(
+                    Criteria.where("time").regex("^\\d{1,2}:\\d{2}$"),
+                    Criteria.where("createdAt").gte(date.atStartOfDay()).lt(date.plusDays(1).atStartOfDay()));
+            Query q = new Query(new Criteria().andOperator(
+                    Criteria.where("idAgency").is(idAgency),
+                    Criteria.where("comandWaiterType").is(ComandWaiterType.TAKE_AWAY.name()),
+                    Criteria.where("status").ne(ComandStatus.DELETED.name()),
+                    new Criteria().orOperator(isoOnDay, hhmmCreatedOnDay)));
+            mongoTemplate.find(q, ComandJpa.class).forEach(c -> {
+                LocalDateTime pickup = parsePickup(c.getTime(),
+                        c.getCreatedAt() != null ? c.getCreatedAt().toLocalDate() : date);
                 if (pickup == null || !pickup.toLocalDate().equals(date)) return;
                 LocalTime slotStart = snapToSlotStart(pickup.toLocalTime(), duration);
                 int products = c.getOrders() == null ? 0 : c.getOrders().stream()

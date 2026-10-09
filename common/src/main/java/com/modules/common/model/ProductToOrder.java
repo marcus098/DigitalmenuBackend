@@ -13,6 +13,8 @@ public class ProductToOrder {
     private List<IngredientOrder> ingredientsMinus = new ArrayList<>();
     private List<IngredientOrderPlus> ingredientsPlus = new ArrayList<>();
     private String note;
+    /** Prezzo unitario (opzione + extra) in centesimi, calcolato server-side dal catalogo al momento dell'ordine. */
+    private Long unitPriceCents;
 
     public ProductToOrder() {}
 
@@ -37,6 +39,14 @@ public class ProductToOrder {
     //    this.note = addProductToOrder.getNote();
     //    this.ingredientsPlus = ingredientOrderPlus;
     //}
+
+    public Long getUnitPriceCents() {
+        return unitPriceCents;
+    }
+
+    public void setUnitPriceCents(Long unitPriceCents) {
+        this.unitPriceCents = unitPriceCents;
+    }
 
     public String getNote() {
         return note;
@@ -121,6 +131,7 @@ public class ProductToOrder {
                 ", quantity=" + quantity +
                 ", ingredientsMinus=" + ingredientsMinus +
                 ", ingredientsPlus=" + ingredientsPlus +
+                ", unitPriceCents=" + unitPriceCents +
                 '}';
     }
 }

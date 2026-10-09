@@ -18,7 +18,11 @@ public class TableSessionUpdateProducer {
     public void sendUpdate(String sessionId, String type) {
         try {
             String json = String.format("{\"sessionId\":\"%s\",\"type\":\"%s\"}", sessionId, type);
-            this.kafkaTemplate.send(TOPIC, sessionId, json);
+            this.kafkaTemplate.send(TOPIC, sessionId, json).whenComplete((result, ex) -> {
+                if (ex != null) {
+                    ErrorLog.logger.error("Errore invio kafka table-session event sessionId=" + sessionId, ex);
+                }
+            });
         } catch (Exception e) {
             ErrorLog.logger.error("Errore invio kafka table-session event sessionId=" + sessionId, e);
         }
