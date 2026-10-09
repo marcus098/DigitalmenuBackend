@@ -289,11 +289,13 @@ public class TableSessionService {
 
         if (readyClients.isEmpty()) return errorResp(409, "NOT_SUBMITTABLE");
 
+        // Prepagamento al tavolo: ogni cliente paga la propria comanda (non per l'invio forzato dal cameriere)
+        boolean prepay = !force && orderComandService.requiresPrepayment(idAgency, PrepaymentPolicy.Channel.TABLE);
         List<TableSessionJpa.SubmittedComand> created = new ArrayList<>();
         for (TableSessionJpa.SessionClient sc : readyClients) {
             try {
                 String comandId = createComandForClient(idAgency, tableId, session.getId(),
-                        sc.getClientSessionId(), sc.getDraftOrder());
+                        sc.getClientSessionId(), sc.getDraftOrder(), prepay);
                 if (comandId != null) {
                     created.add(new TableSessionJpa.SubmittedComand(sc.getClientSessionId(), comandId));
                 }
@@ -320,15 +322,16 @@ public class TableSessionService {
     }
 
     private String createComandForClient(long idAgency, long tableId, String tableSessionId,
-                                         String clientSessionId, List<AddComandOrder> draftOrders) {
+                                         String clientSessionId, List<AddComandOrder> draftOrders, boolean prepay) {
         String comandId = UUID.randomUUID().toString() + "_" + System.currentTimeMillis();
         List<Order> orders = orderComandService.orderList(idAgency, 0L, draftOrders, comandId);
         ComandFromWaiterJpa comand = new ComandFromWaiterJpa(idAgency, tableId, 0L,
-                ComandStatus.AWAIT, orders, tableSessionId);
+                prepay ? ComandStatus.AWAIT_PAYMENT : ComandStatus.AWAIT, orders, tableSessionId);
         comand.setComandWaiterType(ComandWaiterType.TABLE);
         comand.setClientSessionId(clientSessionId);
         Comand saved = mongoComandRepository.save(comand);
-        orderComandService.notifyComandCreated(saved);
+        // Prepagamento: stampa/dashboard partono solo a pagamento confermato (OrderComandService.onPaymentCompleted)
+        if (!prepay) orderComandService.notifyComandCreated(saved);
         return saved.getId();
     }
 
@@ -578,7 +581,8 @@ public class TableSessionService {
                         s.getId(), s.getIdAgency(),
                         Arrays.asList(ComandStatus.AWAIT.toString(), ComandStatus.PENDING.toString(),
                                 ComandStatus.PROGRESS.toString(), ComandStatus.COMPLETED.toString(),
-                                ComandStatus.DELETED.toString()));
+                                ComandStatus.DELETED.toString(), ComandStatus.AWAIT_PAYMENT.toString(),
+                                ComandStatus.AWAIT_APPROVAL.toString()));
                 for (Comand c : existing) statusByComand.put(c.getId(), c.getStatus());
             }
             for (TableSessionJpa.SubmittedComand sub : s.getComands()) {

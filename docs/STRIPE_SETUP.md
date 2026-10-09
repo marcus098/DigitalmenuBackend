@@ -48,8 +48,16 @@ Crea **due** endpoint in *Sviluppatori → Webhook*:
 
 - `payment_intent.succeeded` → pagamento `COMPLETED`, comanda marcata `paid`, notifica realtime alle dashboard
 - `payment_intent.payment_failed` → `FAILED` (l'intent resta riutilizzabile con un altro metodo)
+- `payment_intent.amount_capturable_updated` → `AUTHORIZED` (intent con `capture_method=manual`, usato per gli
+  ordini asporto "su richiesta" con prepagamento): la comanda passa da `AWAIT_PAYMENT` ad `AWAIT_APPROVAL`.
+  Se il locale accetta l'importo viene incassato (capture, poi arriva `payment_intent.succeeded`); se rifiuta o non
+  risponde entro la scadenza l'autorizzazione viene annullata (nessun addebito, nessuna commissione di rimborso)
 - `payment_intent.canceled` → `CANCELED`
-- `charge.refunded` → `REFUNDED` / `PARTIALLY_REFUNDED` con `refundedCents`
+- `charge.refunded` → `REFUNDED` / `PARTIALLY_REFUNDED` con `refundedCents` (rimborso totale: comanda `paid=false`, `refunded=true`)
+
+**Prepagamento** (Impostazioni pagamenti → "Pagamento anticipato obbligatorio" per asporto e/o tavolo, attivabile
+solo con `chargesEnabled`): la comanda nasce in `AWAIT_PAYMENT`, non viene stampata né mostrata alle dashboard
+finché il pagamento non è confermato; dopo 15 minuti senza pagamento viene annullata e lo slot liberato.
 
 Il signing secret va in `STRIPE_WEBHOOK_SECRET`.
 

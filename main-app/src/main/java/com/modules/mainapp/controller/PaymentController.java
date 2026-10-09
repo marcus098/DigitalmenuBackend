@@ -53,6 +53,32 @@ public class PaymentController {
         }
     }
 
+    // ── Impostazioni prepagamento del locale ───────────────────────────────
+
+    @GetMapping("/settings")
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
+    public ResponseEntity<?> getSettings() {
+        try {
+            return ResponseEntity.ok(new DataResponse<>(connectService.getPrepaymentSettings(authUserProvider.getAgencyId())));
+        } catch (ResponseStatusException e) {
+            return error(e);
+        }
+    }
+
+    /** Body: {prepaymentTakeaway, prepaymentTable}. 400 se si attiva il prepagamento senza Stripe attivo. */
+    @PutMapping("/settings")
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
+    public ResponseEntity<?> updateSettings(@RequestBody Map<String, Object> body) {
+        try {
+            boolean takeaway = body != null && Boolean.TRUE.equals(body.get("prepaymentTakeaway"));
+            boolean table = body != null && Boolean.TRUE.equals(body.get("prepaymentTable"));
+            return ResponseEntity.ok(new DataResponse<>(
+                    connectService.updatePrepaymentSettings(authUserProvider.getAgencyId(), takeaway, table)));
+        } catch (ResponseStatusException e) {
+            return error(e);
+        }
+    }
+
     // ── Stripe Connect (onboarding del locale) ─────────────────────────────
 
     @PostMapping("/connect/onboard")

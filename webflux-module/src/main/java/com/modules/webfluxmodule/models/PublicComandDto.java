@@ -24,7 +24,19 @@ public record PublicComandDto(
         List<Order> orders,
         long totalCents,
         /** true se la comanda è stata pagata online (Stripe). */
-        boolean paid
+        boolean paid,
+        /** Ordine "su richiesta": serve l'approvazione del locale. */
+        boolean approvalRequired,
+        /** Scadenza entro cui il locale deve rispondere (AWAIT_APPROVAL). */
+        LocalDateTime approvalDeadline,
+        /** Motivo del rifiuto/annullamento (DELETED). */
+        String rejectReason,
+        /** Importo autorizzato ma non ancora addebitato. */
+        boolean paymentAuthorized,
+        /** Autorizzazione annullata dopo il rifiuto: nessun addebito. */
+        boolean authorizationCanceled,
+        /** Pagamento rimborsato integralmente. */
+        boolean refunded
 ) {
 
     public static PublicComandDto from(ComandReactive c) {
@@ -35,7 +47,10 @@ public record PublicComandDto(
                 .toList();
         Long idTable = c.getIdTable() != null && c.getIdTable() > 0 ? c.getIdTable() : null;
         return new PublicComandDto(c.getId(), c.getType(), c.getStatus(), c.getCreatedAt(), c.getUpdatedAt(),
-                idTable, orders, totalCents(orders), Boolean.TRUE.equals(c.getPaid()));
+                idTable, orders, totalCents(orders), Boolean.TRUE.equals(c.getPaid()),
+                Boolean.TRUE.equals(c.getApprovalRequired()), c.getApprovalDeadline(), c.getRejectReason(),
+                Boolean.TRUE.equals(c.getPaymentAuthorized()), Boolean.TRUE.equals(c.getAuthorizationCanceled()),
+                Boolean.TRUE.equals(c.getRefunded()));
     }
 
     /**

@@ -11,6 +11,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
+
 @CrossOrigin(origins = "*")
 @RequestMapping("/api/public")
 @RestController
@@ -26,49 +28,60 @@ public class PublicOrderController {
     private UserRepository userRepository;
 
     @PostMapping("/orders/insert")
-    public ResponseEntity<String> insertClientOrder(
+    public ResponseEntity<?> insertClientOrder(
             @RequestBody AddComandClient request,
             HttpServletRequest httpRequest) {
 
         String ip = resolveClientIp(httpRequest);
         if (!rateLimiter.isAllowed(ip)) {
-            return ResponseEntity.status(429).body("Troppe richieste. Riprova tra qualche minuto.");
+            return ResponseEntity.status(429).body(Map.of("message", "Troppe richieste. Riprova tra qualche minuto."));
         }
 
         if (request.getTableId() <= 0 || request.getOrders() == null || request.getOrders().isEmpty()) {
-            return ResponseEntity.status(400).body("Payload non valido");
+            return ResponseEntity.status(400).body(Map.of("message", "Payload non valido"));
         }
 
         try {
-            String comandId = orderComandService.addOrderFromClient(request);
-            return ResponseEntity.status(comandId == null ? 500 : 200).body(comandId);
+            OrderComandService.CreationResult created = orderComandService.addOrderFromClient(request);
+            if (created == null) return ResponseEntity.status(500).body(Map.of("message", "Errore nella creazione dell'ordine"));
+            return ResponseEntity.ok(body(created));
         } catch (OrderRejectedException e) {
-            return ResponseEntity.status(e.getStatus()).body(e.getMessage());
+            return ResponseEntity.status(e.getStatus()).body(Map.of("message", e.getMessage()));
         }
     }
 
+    /**
+     * Risposta di creazione: {id, status, paymentRequired}. paymentRequired = true → il cliente deve pagare subito
+     * (comanda in AWAIT_PAYMENT, annullata dopo 15 minuti se non pagata).
+     */
+    private static Map<String, Object> body(OrderComandService.CreationResult created) {
+        return Map.of("id", created.id(),
+                "status", created.status().name(),
+                "paymentRequired", created.paymentRequired());
+    }
+
     @PostMapping("/orders/takeaway/{localname}")
-    public ResponseEntity<String> insertTakeawayOrder(
+    public ResponseEntity<?> insertTakeawayOrder(
             @PathVariable String localname,
             @RequestBody PublicTakeawayRequest request,
             HttpServletRequest httpRequest) {
 
         String ip = resolveClientIp(httpRequest);
         if (!rateLimiter.isAllowed(ip)) {
-            return ResponseEntity.status(429).body("Troppe richieste. Riprova tra qualche minuto.");
+            return ResponseEntity.status(429).body(Map.of("message", "Troppe richieste. Riprova tra qualche minuto."));
         }
 
         if (request.getCustomerName() == null || request.getCustomerName().isBlank()
                 || request.getCustomerPhone() == null || request.getCustomerPhone().isBlank()
                 || request.getOrders() == null || request.getOrders().isEmpty()) {
-            return ResponseEntity.status(400).body("Dati incompleti");
+            return ResponseEntity.status(400).body(Map.of("message", "Dati incompleti"));
         }
 
         return userRepository.findByUsernameAndDeleted(localname, false)
-                .map(user -> {
-                    String comandId;
+                .<ResponseEntity<?>>map(user -> {
+                    OrderComandService.CreationResult created;
                     try {
-                        comandId = orderComandService.addPublicTakeaway(
+                        created = orderComandService.addPublicTakeaway(
                                 user.getIdAgency(),
                                 request.getCustomerName(),
                                 request.getCustomerPhone(),
@@ -76,14 +89,14 @@ public class PublicOrderController {
                                 request.getOrders()
                         );
                     } catch (OrderRejectedException e) {
-                        return ResponseEntity.status(e.getStatus()).body(e.getMessage());
+                        return ResponseEntity.status(e.getStatus()).body(Map.of("message", e.getMessage()));
                     }
-                    if (comandId == null) {
-                        return ResponseEntity.status(500).body("Errore nella creazione dell'ordine asporto");
+                    if (created == null) {
+                        return ResponseEntity.status(500).body(Map.of("message", "Errore nella creazione dell'ordine asporto"));
                     }
-                    return ResponseEntity.ok(comandId);
+                    return ResponseEntity.ok(body(created));
                 })
-                .orElse(ResponseEntity.status(404).body("Locale non trovato"));
+                .orElse(ResponseEntity.status(404).body(Map.of("message", "Locale non trovato")));
     }
 
     /**

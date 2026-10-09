@@ -1,6 +1,7 @@
 package com.modules.takeawaymodule.model;
 
 import jakarta.persistence.*;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 
 @Entity
@@ -20,8 +21,21 @@ public class TakeawaySlotConfigJpa {
     @Column(name = "max_orders_per_slot", nullable = false)
     private int maxOrdersPerSlot = 5;
 
+    /** Limite opzionale di prodotti per slot: 0 = disattivato (la capacità è in ORDINI). */
     @Column(name = "max_products_per_slot", nullable = false)
     private int maxProductsPerSlot = 20;
+
+    /** Ordini "su richiesta" oltre la capacità: accettati solo previa approvazione del locale. */
+    @Column(name = "reserve_orders_per_slot", nullable = false, columnDefinition = "integer default 0")
+    private int reserveOrdersPerSlot = 0;
+
+    /** "Sospendi asporto": nessun nuovo ordine online finché attivo. */
+    @Column(name = "paused", nullable = false, columnDefinition = "boolean default false")
+    private boolean paused = false;
+
+    /** Ripresa automatica (null = finché non viene ripreso a mano). */
+    @Column(name = "paused_until")
+    private LocalDateTime pausedUntil;
 
     /** JSON: { "MONDAY": [{"start":"19:00","end":"23:00"},{...}], ... } — chiavi DayOfWeek.name() */
     @Column(name = "weekly_hours", columnDefinition = "TEXT", nullable = false)
@@ -57,6 +71,16 @@ public class TakeawaySlotConfigJpa {
     public void setMaxOrdersPerSlot(int v) { this.maxOrdersPerSlot = v; }
     public int getMaxProductsPerSlot() { return maxProductsPerSlot; }
     public void setMaxProductsPerSlot(int v) { this.maxProductsPerSlot = v; }
+    public int getReserveOrdersPerSlot() { return reserveOrdersPerSlot; }
+    public void setReserveOrdersPerSlot(int v) { this.reserveOrdersPerSlot = v; }
+    public boolean isPaused() { return paused; }
+    public void setPaused(boolean v) { this.paused = v; }
+    public LocalDateTime getPausedUntil() { return pausedUntil; }
+    public void setPausedUntil(LocalDateTime v) { this.pausedUntil = v; }
+    /** Pausa attiva ora (scaduta se pausedUntil è passato). */
+    public boolean isPausedAt(LocalDateTime now) {
+        return paused && (pausedUntil == null || now.isBefore(pausedUntil));
+    }
     public String getWeeklyHours() { return weeklyHours; }
     public void setWeeklyHours(String v) { this.weeklyHours = v; }
     public String getClosedDates() { return closedDates; }

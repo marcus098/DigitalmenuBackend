@@ -116,7 +116,7 @@ public class AllService {
 
     private Flux<ComandReactive> getComands(long idAgency) {
 //        return webfluxComandRepository.findAll();
-        return webfluxComandRepository.findByStatusInAndIdAgency(Arrays.asList("PROGRESS", "PENDING", "CANCELLED"), idAgency);
+        return webfluxComandRepository.findByStatusInAndIdAgency(Arrays.asList("PROGRESS", "PENDING", "CANCELLED", "AWAIT_APPROVAL"), idAgency);
     }
 
     private Flux<ProductDto> getProducts(long idAgency, boolean auth) {

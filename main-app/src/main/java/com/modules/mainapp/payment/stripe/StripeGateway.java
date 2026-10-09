@@ -64,6 +64,16 @@ public class StripeGateway {
         return client().paymentIntents().cancel(paymentIntentId);
     }
 
+    /** Incassa un intent con capture_method=manual (stato requires_capture). */
+    public PaymentIntent capturePaymentIntent(String paymentIntentId, String idempotencyKey) throws StripeException {
+        return client().paymentIntents().capture(paymentIntentId,
+                com.stripe.param.PaymentIntentCaptureParams.builder().build(), idempotent(idempotencyKey));
+    }
+
+    public PaymentIntent retrievePaymentIntent(String paymentIntentId) throws StripeException {
+        return client().paymentIntents().retrieve(paymentIntentId);
+    }
+
     public Account createAccount(AccountCreateParams params, String idempotencyKey) throws StripeException {
         return client().accounts().create(params, idempotent(idempotencyKey));
     }

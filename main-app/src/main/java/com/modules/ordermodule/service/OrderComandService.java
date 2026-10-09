@@ -33,8 +33,12 @@ import com.modules.ordermodule.request.AddProductToOrder;
 import com.modules.servletconfiguration.security.AuthenticatedUserProvider;
 import com.modules.takeawaymodule.service.TakeawaySlotService;
 import jakarta.persistence.EntityNotFoundException;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -79,6 +83,29 @@ public class OrderComandService {
     private TableSessionRepository tableSessionRepository;
     @Autowired
     private UserRepository userRepository;
+    @Autowired
+    private ComandStatusUpdater statusUpdater;
+    @Autowired
+    private PrepaymentPolicy prepaymentPolicy;
+    @Autowired
+    private MongoTemplate mongoTemplate;
+    /** Lazy: PaymentService dipende (tramite il calcolo del totale) da questo service. */
+    @Autowired
+    private ObjectProvider<ComandPaymentOperations> paymentOperations;
+
+    /** Esito della creazione di una comanda pubblica: AWAIT_PAYMENT = il cliente deve pagare subito. */
+    public record CreationResult(String id, ComandStatus status) {
+        public boolean paymentRequired() { return status == ComandStatus.AWAIT_PAYMENT; }
+    }
+
+    public boolean requiresPrepayment(long idAgency, PrepaymentPolicy.Channel channel) {
+        try {
+            return prepaymentPolicy.requiresPrepayment(idAgency, channel);
+        } catch (Exception e) {
+            ErrorLog.logger.error("Errore lettura impostazione prepagamento idAgency=" + idAgency, e);
+            return false;
+        }
+    }
 
     public String addOrderWaiter(AddComandWaiter addComandWaiter) {
         TakeawaySlotService.SlotKey slotKey = null;
@@ -276,7 +303,7 @@ public class OrderComandService {
      * @return id della comanda, oppure null per errore interno
      * @throws OrderRejectedException con lo status HTTP da restituire per richieste non valide
      */
-    public String addOrderFromClient(AddComandClient request) {
+    public CreationResult addOrderFromClient(AddComandClient request) {
         if (request.getClientSessionId() == null || request.getClientSessionId().isBlank()) {
             throw new OrderRejectedException(403, "Sessione tavolo mancante: inserisci il codice del tavolo");
         }
@@ -296,14 +323,17 @@ public class OrderComandService {
         long idAgency = agencyId;
         String comandId = UUID.randomUUID().toString() + "_" + System.currentTimeMillis();
         List<Order> orders = orderList(idAgency, 0L, request.getOrders(), comandId);
+        boolean prepay = requiresPrepayment(idAgency, PrepaymentPolicy.Channel.TABLE);
         try {
-            ComandFromWaiterJpa comand = new ComandFromWaiterJpa(idAgency, table.getId(), 0L, ComandStatus.AWAIT, orders, session.getId());
+            ComandFromWaiterJpa comand = new ComandFromWaiterJpa(idAgency, table.getId(), 0L,
+                    prepay ? ComandStatus.AWAIT_PAYMENT : ComandStatus.AWAIT, orders, session.getId());
             comand.setComandWaiterType(ComandWaiterType.TABLE);
             comand.setClientSessionId(request.getClientSessionId());
 
             Comand saved = mongoComandRepository.save(comand);
-            notifyComandCreated(saved);
-            return saved.getId();
+            // Prepagamento: niente stampa/dashboard finché Stripe non conferma (vedi onPaymentCompleted)
+            if (!prepay) notifyComandCreated(saved);
+            return new CreationResult(saved.getId(), saved.getStatus());
         } catch (Exception e) {
             ErrorLog.logger.error("Errore aggiunta ordine da client", e);
             return null;
@@ -335,27 +365,235 @@ public class OrderComandService {
     /**
      * Ordine asporto pubblico. Valida i prodotti e prenota atomicamente lo slot di ritiro.
      *
-     * @return id della comanda, oppure null per errore interno
-     * @throws OrderRejectedException 400 (payload) / 409 (slot non disponibile)
+     * Stato iniziale:
+     * <ul>
+     *   <li>prepagamento richiesto → AWAIT_PAYMENT (approvalRequired se lo slot è nella riserva);</li>
+     *   <li>altrimenti riserva → AWAIT_APPROVAL (visibile in "Da approvare", non stampato);</li>
+     *   <li>altrimenti PENDING + pipeline "creata" (stampa + dashboard).</li>
+     * </ul>
+     *
+     * @return id e stato della comanda, oppure null per errore interno
+     * @throws OrderRejectedException 400 (payload) / 409 (slot non disponibile, chiuso, asporto sospeso)
      */
-    public String addPublicTakeaway(long idAgency, String customerName, String customerPhone, String pickupTime, List<AddComandOrder> orders) {
+    public CreationResult addPublicTakeaway(long idAgency, String customerName, String customerPhone, String pickupTime, List<AddComandOrder> orders) {
         String comandId = UUID.randomUUID().toString() + "_" + System.currentTimeMillis();
         List<Order> orderList = orderList(idAgency, 0L, orders, comandId);
         int products = countProducts(orderList);
-        TakeawaySlotService.SlotKey slotKey = takeawaySlotService.reservePublicSlot(idAgency, pickupTime, products);
+        boolean prepay = requiresPrepayment(idAgency, PrepaymentPolicy.Channel.TAKEAWAY);
+        TakeawaySlotService.SlotReservation reservation =
+                takeawaySlotService.reservePublicSlot(idAgency, pickupTime, products, prepay);
+        ComandStatus status = prepay ? ComandStatus.AWAIT_PAYMENT
+                : reservation.onRequest() ? ComandStatus.AWAIT_APPROVAL : ComandStatus.PENDING;
         try {
             ComandFromWaiterJpa comand = new ComandFromWaiterJpa(
-                    idAgency, 0L, ComandStatus.PENDING, orderList,
+                    idAgency, 0L, status, orderList,
                     customerName, pickupTime, customerPhone
             );
             comand.setComandWaiterType(ComandWaiterType.TAKE_AWAY);
+            if (reservation.onRequest()) comand.setApprovalRequired(true);
+            if (status == ComandStatus.AWAIT_APPROVAL) {
+                comand.setApprovalDeadline(ComandFlowRules.approvalDeadline(LocalDateTime.now(), reservation.slotStart()));
+            }
             Comand saved = mongoComandRepository.save(comand);
-            notifyComandCreated(saved);
-            return saved.getId();
+            switch (status) {
+                case PENDING -> notifyComandCreated(saved);
+                case AWAIT_APPROVAL -> notifyAwaitingApproval(saved);
+                default -> { /* AWAIT_PAYMENT: tutto parte da onPaymentCompleted / onPaymentAuthorized */ }
+            }
+            return new CreationResult(saved.getId(), saved.getStatus());
         } catch (Exception e) {
-            takeawaySlotService.releaseSlot(slotKey, products);
+            takeawaySlotService.releaseSlot(reservation.key(), products);
             ErrorLog.logger.error("Errore aggiunta ordine asporto pubblico", e);
             return null;
+        }
+    }
+
+    /** Ordine "su richiesta" visibile al locale: evento Kafka (dashboard + SSE) ma niente ComandCreatedEvent/stampa. */
+    private void notifyAwaitingApproval(Comand c) {
+        sendOrderKafkaEvent(c.getId(), ComandStatus.AWAIT_APPROVAL.name(), c.getIdAgency());
+    }
+
+    // ── Prepagamento / approvazione ──────────────────────────────────────────
+
+    /**
+     * Pagamento confermato (capture automatica, dopo che la comanda è stata marcata paid): AWAIT_PAYMENT → stato
+     * iniziale del canale (o AWAIT_APPROVAL per gli ordini nella riserva) con update condizionale, poi la pipeline
+     * "creata" (stampa + dashboard). È l'UNICO punto in cui parte la pipeline per gli ordini prepagati.
+     * Idempotente: una seconda chiamata (retry webhook) non trova più AWAIT_PAYMENT e non fa nulla.
+     *
+     * @return true se la transizione è avvenuta ora
+     */
+    public boolean onPaymentCompleted(String comandId) {
+        ComandJpa c = mongoComandReadRepository.findById(comandId).orElse(null);
+        if (c == null || c.getStatus() != ComandStatus.AWAIT_PAYMENT) return false;
+        ComandStatus target = ComandFlowRules.statusAfterPayment(c.getComandWaiterType(), c.getApprovalRequired());
+        LocalDateTime deadline = target == ComandStatus.AWAIT_APPROVAL ? approvalDeadlineFor(c) : null;
+        boolean moved = statusUpdater.compareAndSet(comandId, null, List.of(ComandStatus.AWAIT_PAYMENT), target,
+                deadline == null ? null : u -> u.set("approvalDeadline", deadline));
+        if (!moved) return false;
+        c.setStatus(target);
+        if (target == ComandStatus.AWAIT_APPROVAL) notifyAwaitingApproval(c);
+        else notifyComandCreated(c);
+        return true;
+    }
+
+    /**
+     * Importo autorizzato (capture manuale, ordine nella riserva): AWAIT_PAYMENT → AWAIT_APPROVAL. Il locale lo vede
+     * in "Da approvare" (Kafka/SSE) ma NON viene stampato: la pipeline "creata" parte solo all'approvazione.
+     */
+    public boolean onPaymentAuthorized(String comandId, String paymentIntentId) {
+        ComandJpa c = mongoComandReadRepository.findById(comandId).orElse(null);
+        if (c == null || c.getStatus() != ComandStatus.AWAIT_PAYMENT) return false;
+        LocalDateTime deadline = approvalDeadlineFor(c);
+        boolean moved = statusUpdater.compareAndSet(comandId, null, List.of(ComandStatus.AWAIT_PAYMENT),
+                ComandStatus.AWAIT_APPROVAL, u -> {
+                    u.set("paymentAuthorized", true).set("approvalDeadline", deadline);
+                    if (paymentIntentId != null) u.set("paymentIntentId", paymentIntentId);
+                });
+        if (!moved) return false;
+        notifyAwaitingApproval(c);
+        return true;
+    }
+
+    /** Scadenza approvazione da adesso: min(ora + 10 min, inizio slot di ritiro). */
+    private LocalDateTime approvalDeadlineFor(ComandJpa c) {
+        LocalDateTime slotStart = null;
+        if (c.getComandWaiterType() == ComandWaiterType.TAKE_AWAY && c.getIdAgency() != null) {
+            slotStart = takeawaySlotService.slotStartFor(c.getIdAgency(), c.getTime(), c.getCreatedAt());
+        }
+        return ComandFlowRules.approvalDeadline(LocalDateTime.now(), slotStart);
+    }
+
+    /**
+     * Il locale accetta un ordine "su richiesta": AWAIT_APPROVAL → PENDING (update condizionale, vince su un rifiuto
+     * concorrente), incasso dell'importo autorizzato se presente, poi pipeline "creata" (stampa + dashboard).
+     * Se l'incasso fallisce l'ordine viene annullato (l'autorizzazione non è più valida).
+     *
+     * @throws OrderRejectedException 404 (non trovata / altra agency), 409 (non più in attesa / incasso fallito)
+     */
+    public void approve(String comandId) {
+        long idAgency = authUserProvider.getAgencyId();
+        long idUser = authUserProvider.getUserId();
+        ComandJpa c = requireOwnComand(comandId, idAgency);
+        if (c.getStatus() != ComandStatus.AWAIT_APPROVAL
+                || !statusUpdater.compareAndSet(comandId, idAgency, List.of(ComandStatus.AWAIT_APPROVAL),
+                ComandStatus.PENDING, null)) {
+            throw new OrderRejectedException(409, "L'ordine non è più in attesa di approvazione");
+        }
+        if (Boolean.TRUE.equals(c.getPaymentAuthorized())) {
+            boolean captured;
+            try {
+                captured = paymentOperations.getObject().captureAuthorized(comandId);
+            } catch (Exception e) {
+                ErrorLog.logger.error("Errore incasso pagamento autorizzato comanda " + comandId, e);
+                captured = false;
+            }
+            if (!captured) {
+                if (statusUpdater.compareAndSet(comandId, idAgency, List.of(ComandStatus.PENDING), ComandStatus.DELETED,
+                        u -> u.set("rejectReason", ComandFlowRules.REASON_CAPTURE_FAILED))) {
+                    afterDeleted(c, ComandStatus.PENDING, true);
+                }
+                throw new OrderRejectedException(409,
+                        "Impossibile incassare il pagamento autorizzato: l'ordine è stato annullato");
+            }
+        }
+        saveLog(ComandStatus.AWAIT_APPROVAL, ComandStatus.PENDING, "approve comand " + comandId, idUser, idAgency);
+        c.setStatus(ComandStatus.PENDING);
+        notifyComandCreated(c);
+    }
+
+    /**
+     * Il locale rifiuta un ordine "su richiesta": AWAIT_APPROVAL → DELETED con motivo (visibile al cliente),
+     * libera lo slot e annulla l'autorizzazione di pagamento (nessun addebito).
+     */
+    public void reject(String comandId, String reason) {
+        long idAgency = authUserProvider.getAgencyId();
+        long idUser = authUserProvider.getUserId();
+        ComandJpa c = requireOwnComand(comandId, idAgency);
+        String r = reason == null || reason.isBlank() ? "Ordine rifiutato dal locale"
+                : reason.strip().substring(0, Math.min(reason.strip().length(), 300));
+        if (c.getStatus() != ComandStatus.AWAIT_APPROVAL || !rejectInternal(c, idAgency, r)) {
+            throw new OrderRejectedException(409, "L'ordine non è più in attesa di approvazione");
+        }
+        saveLog(ComandStatus.AWAIT_APPROVAL, ComandStatus.DELETED, "reject comand " + comandId + ": " + r, idUser, idAgency);
+    }
+
+    private boolean rejectInternal(ComandJpa c, Long idAgency, String reason) {
+        boolean authorized = Boolean.TRUE.equals(c.getPaymentAuthorized());
+        boolean moved = statusUpdater.compareAndSet(c.getId(), idAgency, List.of(ComandStatus.AWAIT_APPROVAL),
+                ComandStatus.DELETED, u -> {
+                    u.set("rejectReason", reason);
+                    if (authorized) u.set("authorizationCanceled", true);
+                });
+        if (moved) afterDeleted(c, ComandStatus.AWAIT_APPROVAL, true);
+        return moved;
+    }
+
+    /** Dopo un passaggio a DELETED: libera lo slot, evento di dominio (annulla gli intent Stripe), Kafka opzionale. */
+    private void afterDeleted(ComandJpa c, ComandStatus oldStatus, boolean notifyDashboards) {
+        long idAgency = c.getIdAgency();
+        if (c.getComandWaiterType() == ComandWaiterType.TAKE_AWAY) {
+            takeawaySlotService.onTakeawayStatusChanged(idAgency, c.getTime(), c.getCreatedAt(),
+                    countProducts(c.getOrders()), oldStatus, ComandStatus.DELETED);
+        }
+        try {
+            eventPublisher.publishEvent(new ComandStatusChangedEvent(c.getId(), String.valueOf(idAgency), oldStatus, ComandStatus.DELETED));
+        } catch (Exception e) {
+            ErrorLog.logger.error("Errore pubblicazione ComandStatusChangedEvent comandId=" + c.getId(), e);
+        }
+        if (notifyDashboards) sendOrderKafkaEvent(c.getId(), ComandStatus.DELETED.name(), idAgency);
+    }
+
+    /**
+     * Job: comande in AWAIT_PAYMENT da più di 15 minuti → DELETED (slot liberato, intent annullato).
+     * Se un intent non è annullabile (pagamento appena riuscito, webhook in arrivo) la comanda viene lasciata stare.
+     * @return numero di comande scadute
+     */
+    public int expireUnpaid(LocalDateTime now) {
+        Query q = new Query(Criteria.where("status").is(ComandStatus.AWAIT_PAYMENT.name())
+                .and("createdAt").lte(now.minus(ComandFlowRules.PAYMENT_WINDOW))).limit(200);
+        int count = 0;
+        for (ComandJpa c : mongoTemplate.find(q, ComandJpa.class, ComandStatusUpdater.COLLECTION)) {
+            try {
+                if (!paymentOperations.getObject().cancelOpenIntents(c.getId())) continue;
+                if (statusUpdater.compareAndSet(c.getId(), null, List.of(ComandStatus.AWAIT_PAYMENT), ComandStatus.DELETED,
+                        u -> u.set("rejectReason", ComandFlowRules.REASON_PAYMENT_EXPIRED))) {
+                    afterDeleted(c, ComandStatus.AWAIT_PAYMENT, false);
+                    count++;
+                }
+            } catch (Exception e) {
+                ErrorLog.logger.error("Errore scadenza comanda non pagata " + c.getId(), e);
+            }
+        }
+        return count;
+    }
+
+    /** Job: ordini "su richiesta" oltre la scadenza → rifiuto automatico "Nessuna risposta dal locale". */
+    public int autoRejectExpiredApprovals(LocalDateTime now) {
+        Query q = new Query(Criteria.where("status").is(ComandStatus.AWAIT_APPROVAL.name())
+                .and("approvalDeadline").lte(now)).limit(200);
+        int count = 0;
+        for (ComandJpa c : mongoTemplate.find(q, ComandJpa.class, ComandStatusUpdater.COLLECTION)) {
+            try {
+                if (rejectInternal(c, null, ComandFlowRules.REASON_NO_ANSWER)) count++;
+            } catch (Exception e) {
+                ErrorLog.logger.error("Errore rifiuto automatico comanda " + c.getId(), e);
+            }
+        }
+        return count;
+    }
+
+    private ComandJpa requireOwnComand(String comandId, long idAgency) {
+        return mongoComandReadRepository.findById(comandId)
+                .filter(c -> c.getIdAgency() != null && c.getIdAgency() == idAgency)
+                .orElseThrow(() -> new OrderRejectedException(404, "Comanda non trovata"));
+    }
+
+    private void saveLog(ComandStatus from, ComandStatus to, String what, long idUser, long idAgency) {
+        try {
+            mongoComandLogRepository.save(new EntityLog<>(LogOperation.OTHER, from, to, what, idUser, idAgency));
+        } catch (Exception e) {
+            ErrorLog.logger.error("Errore salvataggio log comanda", e);
         }
     }
 
@@ -376,8 +614,24 @@ public class OrderComandService {
             ComandJpa comandFromWaiterJpa = comand.get();
             ComandStatus oldStatus = comandFromWaiterJpa.getStatus();
 
-            comandFromWaiterJpa.setStatus(comandStatus);
-            mongoComandRepository.save(comandFromWaiterJpa);
+            // Gli stati di attesa si impostano solo dai flussi dedicati (pagamento / approvazione)
+            if (ComandFlowRules.isWaitingStatus(comandStatus)) {
+                return CompletableFuture.completedFuture(400);
+            }
+            if (oldStatus == ComandStatus.AWAIT_APPROVAL) {
+                // dalla dashboard un "elimina" su un ordine da approvare equivale a un rifiuto
+                if (comandStatus != ComandStatus.DELETED) return CompletableFuture.completedFuture(409);
+                boolean rejected = rejectInternal(comandFromWaiterJpa, idAgency, "Ordine rifiutato dal locale");
+                return CompletableFuture.completedFuture(rejected ? 200 : 409);
+            }
+            if (oldStatus == ComandStatus.AWAIT_PAYMENT && comandStatus != ComandStatus.DELETED) {
+                return CompletableFuture.completedFuture(409);
+            }
+
+            // Update condizionale (solo status + updatedAt): non sovrascrive paid/paymentIntentId scritti dal webhook
+            if (!statusUpdater.compareAndSet(idComand, idAgency, List.of(oldStatus), comandStatus, null)) {
+                return CompletableFuture.completedFuture(409);
+            }
 
             EntityLog<?> comandLog = new EntityLog<>(
                     LogOperation.OTHER, oldStatus, comandStatus,

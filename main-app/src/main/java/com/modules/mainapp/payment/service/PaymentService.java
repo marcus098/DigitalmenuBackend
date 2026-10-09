@@ -9,7 +9,11 @@ import com.modules.common.model.ComandFromWaiter;
 import com.modules.common.model.enums.ComandStatus;
 import com.modules.mainapp.payment.ApplicationFeeCalculator;
 import com.modules.mainapp.payment.ComandTotalCalculator;
+import com.modules.mainapp.payment.PaymentAuthorizedEvent;
 import com.modules.mainapp.payment.PaymentCompletedEvent;
+import com.modules.mainapp.payment.PaymentRefundedEvent;
+import com.modules.ordermodule.service.ComandFlowRules;
+import com.modules.ordermodule.service.ComandPaymentOperations;
 import com.modules.mainapp.payment.dto.PaymentIntentResponse;
 import com.modules.mainapp.payment.entity.PaymentJpa;
 import com.modules.mainapp.payment.repository.PaymentRepository;
@@ -42,7 +46,7 @@ import java.util.Map;
 import java.util.Optional;
 
 @Service
-public class PaymentService {
+public class PaymentService implements ComandPaymentOperations {
 
     public static final String STATUS_PENDING = "PENDING";
     public static final String STATUS_COMPLETED = "COMPLETED";
@@ -50,9 +54,13 @@ public class PaymentService {
     public static final String STATUS_CANCELED = "CANCELED";
     public static final String STATUS_REFUNDED = "REFUNDED";
     public static final String STATUS_PARTIALLY_REFUNDED = "PARTIALLY_REFUNDED";
+    /** Importo autorizzato (capture manuale) in attesa che il locale approvi l'ordine. */
+    public static final String STATUS_AUTHORIZED = "AUTHORIZED";
 
     /** Stati di un intent ancora pagabile (riusabile o da annullare). */
     static final List<String> OPEN_STATUSES = List.of(STATUS_PENDING, STATUS_FAILED);
+    /** Stati annullabili su Stripe (incluse le autorizzazioni non ancora incassate). */
+    static final List<String> CANCELABLE_STATUSES = List.of(STATUS_PENDING, STATUS_FAILED, STATUS_AUTHORIZED);
 
     public static final String PAYMENTS_NOT_ACTIVE = "Pagamenti online non attivi per questo locale";
 
@@ -128,6 +136,18 @@ public class PaymentService {
         if (comand.getStatus() == ComandStatus.DELETED) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Comanda annullata");
         }
+        if (comand.getStatus() == ComandStatus.AWAIT_APPROVAL) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, Boolean.TRUE.equals(comand.getPaymentAuthorized())
+                    ? "Pagamento già autorizzato: in attesa di conferma del locale"
+                    : "Ordine in attesa di conferma del locale");
+        }
+        if (comand.getStatus() == ComandStatus.AWAIT_PAYMENT
+                && ComandFlowRules.isPaymentExpired(comand.getCreatedAt(), LocalDateTime.now())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Tempo per il pagamento scaduto: ripeti l'ordine");
+        }
+        // Ordine nella riserva dello slot con prepagamento: si autorizza soltanto, l'incasso avviene all'approvazione
+        boolean manualCapture = comand.getStatus() == ComandStatus.AWAIT_PAYMENT
+                && Boolean.TRUE.equals(comand.getApprovalRequired());
         if (Boolean.TRUE.equals(comand.getPaid()) || paymentRepository.existsByComandIdAndStatus(comandId, STATUS_COMPLETED)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Comanda già pagata");
         }
@@ -161,7 +181,7 @@ public class PaymentService {
                 p.setStatus(STATUS_PENDING);
                 paymentRepository.save(p);
             }
-            return new PaymentIntentResponse(p.getStripeClientSecret(), p.getStripePaymentIntentId(), amountCents);
+            return new PaymentIntentResponse(p.getStripeClientSecret(), p.getStripePaymentIntentId(), amountCents, manualCapture);
         }
 
         long feeCents = ApplicationFeeCalculator.feeCents(amountCents, connectService.effectiveFeeBps(agency));
@@ -179,17 +199,21 @@ public class PaymentService {
                 .putMetadata("comandId", comandId)
                 .putMetadata("idTable", comandTable != null ? String.valueOf(comandTable) : "");
         if (feeCents > 0) params.setApplicationFeeAmount(feeCents);
+        if (manualCapture) {
+            params.setCaptureMethod(PaymentIntentCreateParams.CaptureMethod.MANUAL)
+                    .putMetadata("approvalRequired", "true");
+        }
 
-        // Deterministica per (comanda, importo, destinazione, n. tentativi): un doppio click non crea due intent
+        // Deterministica per (comanda, importo, destinazione, modalità, n. tentativi): un doppio click non crea due intent
         String idempotencyKey = "pi-" + comandId + "-" + amountCents + "-" + cur + "-" + destination
-                + "-" + paymentRepository.countByComandId(comandId);
+                + (manualCapture ? "-manual" : "") + "-" + paymentRepository.countByComandId(comandId);
 
         try {
             PaymentIntent intent = stripe.createPaymentIntent(params.build(), idempotencyKey);
 
             Optional<PaymentJpa> already = paymentRepository.findByStripePaymentIntentId(intent.getId());
             if (already.isPresent()) {
-                return new PaymentIntentResponse(intent.getClientSecret(), intent.getId(), amountCents);
+                return new PaymentIntentResponse(intent.getClientSecret(), intent.getId(), amountCents, manualCapture);
             }
 
             PaymentJpa payment = new PaymentJpa();
@@ -205,7 +229,7 @@ public class PaymentService {
             payment.setStatus(STATUS_PENDING);
             paymentRepository.save(payment);
 
-            return new PaymentIntentResponse(intent.getClientSecret(), intent.getId(), amountCents);
+            return new PaymentIntentResponse(intent.getClientSecret(), intent.getId(), amountCents, manualCapture);
         } catch (StripeException e) {
             ErrorLog.logger.error("Stripe: errore creazione PaymentIntent comanda {}", comandId, e);
             throw new RuntimeException("Stripe error: " + e.getMessage(), e);
@@ -239,18 +263,57 @@ public class PaymentService {
             ErrorLog.logger.warn("Stripe: impossibile annullare intent {}: {}", p.getStripePaymentIntentId(), e.getMessage());
             return false;
         }
-        paymentRepository.updateStatusIfIn(p.getStripePaymentIntentId(), OPEN_STATUSES, STATUS_CANCELED, LocalDateTime.now());
+        paymentRepository.updateStatusIfIn(p.getStripePaymentIntentId(), CANCELABLE_STATUSES, STATUS_CANCELED, LocalDateTime.now());
         return true;
     }
 
-    /** Comanda eliminata: annulla gli intent ancora aperti (best effort, errori solo loggati). */
+    /** Comanda eliminata: annulla gli intent ancora aperti o autorizzati (best effort, errori solo loggati). */
     public void cancelOpenIntentsForComand(String comandId) {
-        if (comandId == null || !stripe.isConfigured()) return;
-        for (PaymentJpa p : paymentRepository.findByComandIdAndStatusInOrderByCreatedAtDesc(comandId, OPEN_STATUSES)) {
-            if (!cancelIntent(p)) {
-                ErrorLog.logger.warn("Comanda {} eliminata ma l'intent {} non è annullabile (forse già pagato)",
-                        comandId, p.getStripePaymentIntentId());
+        if (!cancelOpenIntents(comandId)) {
+            ErrorLog.logger.warn("Comanda {} eliminata ma un intent non è annullabile (forse già pagato)", comandId);
+        }
+    }
+
+    /**
+     * Annulla gli intent aperti/autorizzati della comanda (un'autorizzazione annullata non costa commissioni).
+     * @return false se almeno un intent non è annullabile (es. appena pagato)
+     */
+    @Override
+    public boolean cancelOpenIntents(String comandId) {
+        if (comandId == null || !stripe.isConfigured()) return true;
+        boolean all = true;
+        for (PaymentJpa p : paymentRepository.findByComandIdAndStatusInOrderByCreatedAtDesc(comandId, CANCELABLE_STATUSES)) {
+            if (!cancelIntent(p)) all = false;
+        }
+        return all;
+    }
+
+    /**
+     * Incassa l'importo autorizzato della comanda (ordine "su richiesta" approvato). Idempotency key per intent:
+     * un doppio click non incassa due volte. Lo stato COMPLETED + paid arrivano dal webhook payment_intent.succeeded.
+     *
+     * @return true se incassato (o già incassato), false se non c'è un'autorizzazione valida o Stripe rifiuta
+     */
+    @Override
+    public boolean captureAuthorized(String comandId) {
+        if (comandId == null) return false;
+        List<PaymentJpa> authorized = paymentRepository.findByComandIdAndStatusInOrderByCreatedAtDesc(
+                comandId, List.of(STATUS_AUTHORIZED));
+        if (authorized.isEmpty()) {
+            return paymentRepository.existsByComandIdAndStatus(comandId, STATUS_COMPLETED);
+        }
+        PaymentJpa p = authorized.get(0);
+        try {
+            PaymentIntent captured = stripe.capturePaymentIntent(p.getStripePaymentIntentId(),
+                    "capture-" + p.getStripePaymentIntentId());
+            boolean ok = "succeeded".equals(captured.getStatus()) || "processing".equals(captured.getStatus());
+            if (!ok) {
+                ErrorLog.logger.error("Stripe: capture intent {} in stato inatteso {}", p.getStripePaymentIntentId(), captured.getStatus());
             }
+            return ok;
+        } catch (StripeException e) {
+            ErrorLog.logger.error("Stripe: errore capture intent {} comanda {}", p.getStripePaymentIntentId(), comandId, e);
+            return false;
         }
     }
 
@@ -322,10 +385,14 @@ public class PaymentService {
                     paymentRepository.updateStatusIfIn(intent.getId(), List.of(STATUS_PENDING), STATUS_FAILED, LocalDateTime.now());
                 }
             }
+            case "payment_intent.amount_capturable_updated" -> {
+                PaymentIntent intent = asIntent(event);
+                if (intent != null) onAuthorized(intent);
+            }
             case "payment_intent.canceled" -> {
                 PaymentIntent intent = asIntent(event);
                 if (intent != null) {
-                    paymentRepository.updateStatusIfIn(intent.getId(), OPEN_STATUSES, STATUS_CANCELED, LocalDateTime.now());
+                    paymentRepository.updateStatusIfIn(intent.getId(), CANCELABLE_STATUSES, STATUS_CANCELED, LocalDateTime.now());
                 }
             }
             case "charge.refunded" -> {
@@ -336,9 +403,29 @@ public class PaymentService {
         }
     }
 
+    /**
+     * Autorizzazione completata (capture manuale, intent in requires_capture): PENDING/FAILED → AUTHORIZED con update
+     * condizionale, quindi {@link PaymentAuthorizedEvent} una sola volta (la comanda passa in "Da approvare").
+     */
+    private void onAuthorized(PaymentIntent intent) {
+        if (intent.getAmountCapturable() == null || intent.getAmountCapturable() <= 0) return;
+        int updated = paymentRepository.updateStatusIfIn(intent.getId(),
+                List.of(STATUS_PENDING, STATUS_FAILED), STATUS_AUTHORIZED, LocalDateTime.now());
+        if (updated == 0) {
+            ErrorLog.logger.info("Stripe webhook: intent {} già autorizzato/chiuso o sconosciuto, ignorato", intent.getId());
+            return;
+        }
+        paymentRepository.findByStripePaymentIntentId(intent.getId()).ifPresent(p -> {
+            if (p.getComandId() != null && !p.getComandId().isBlank()) {
+                eventPublisher.publishEvent(new PaymentAuthorizedEvent(
+                        p.getComandId(), String.valueOf(p.getIdAgency()), intent.getAmountCapturable(), intent.getId()));
+            }
+        });
+    }
+
     private void onSucceeded(PaymentIntent intent) {
         int updated = paymentRepository.updateStatusIfIn(intent.getId(),
-                List.of(STATUS_PENDING, STATUS_FAILED, STATUS_CANCELED), STATUS_COMPLETED, LocalDateTime.now());
+                List.of(STATUS_PENDING, STATUS_FAILED, STATUS_CANCELED, STATUS_AUTHORIZED), STATUS_COMPLETED, LocalDateTime.now());
         if (updated == 0) {
             ErrorLog.logger.info("Stripe webhook: intent {} già COMPLETED/rimborsato o sconosciuto, ignorato", intent.getId());
             return;
@@ -364,9 +451,13 @@ public class PaymentService {
             // amount_refunded è cumulativo: si tiene il massimo (eventi fuori ordine non fanno regredire)
             long total = Math.max(refunded, previous);
             p.setRefundedCents(total);
-            p.setStatus(total >= p.getAmountCents() || Boolean.TRUE.equals(charge.getRefunded())
-                    ? STATUS_REFUNDED : STATUS_PARTIALLY_REFUNDED);
+            boolean full = total >= p.getAmountCents() || Boolean.TRUE.equals(charge.getRefunded());
+            p.setStatus(full ? STATUS_REFUNDED : STATUS_PARTIALLY_REFUNDED);
             paymentRepository.save(p);
+            if (p.getComandId() != null && !p.getComandId().isBlank()) {
+                eventPublisher.publishEvent(new PaymentRefundedEvent(
+                        p.getComandId(), String.valueOf(p.getIdAgency()), total, full));
+            }
         });
     }
 

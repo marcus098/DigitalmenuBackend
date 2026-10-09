@@ -20,8 +20,33 @@ public abstract class Comand {
     private Boolean paid;
     private LocalDateTime paidAt;
     private String paymentIntentId;
+    /** Ordine nella riserva dello slot: richiede l'approvazione del locale (anche dopo il prepagamento). */
+    private Boolean approvalRequired;
+    /** Scadenza entro cui il locale deve approvare (poi rifiuto automatico). */
+    private LocalDateTime approvalDeadline;
+    /** Motivo del rifiuto/annullamento mostrato al cliente. */
+    private String rejectReason;
+    /** Importo autorizzato su Stripe (capture manuale) ma non ancora incassato. */
+    private Boolean paymentAuthorized;
+    /** Autorizzazione annullata (ordine rifiutato): nessun addebito per il cliente. */
+    private Boolean authorizationCanceled;
+    /** Pagamento rimborsato integralmente. */
+    private Boolean refunded;
 
     public Comand() {}
+
+    public Boolean getApprovalRequired() { return approvalRequired; }
+    public void setApprovalRequired(Boolean approvalRequired) { this.approvalRequired = approvalRequired; }
+    public LocalDateTime getApprovalDeadline() { return approvalDeadline; }
+    public void setApprovalDeadline(LocalDateTime approvalDeadline) { this.approvalDeadline = approvalDeadline; }
+    public String getRejectReason() { return rejectReason; }
+    public void setRejectReason(String rejectReason) { this.rejectReason = rejectReason; }
+    public Boolean getPaymentAuthorized() { return paymentAuthorized; }
+    public void setPaymentAuthorized(Boolean paymentAuthorized) { this.paymentAuthorized = paymentAuthorized; }
+    public Boolean getAuthorizationCanceled() { return authorizationCanceled; }
+    public void setAuthorizationCanceled(Boolean authorizationCanceled) { this.authorizationCanceled = authorizationCanceled; }
+    public Boolean getRefunded() { return refunded; }
+    public void setRefunded(Boolean refunded) { this.refunded = refunded; }
 
     public Boolean getPaid() {
         return paid;

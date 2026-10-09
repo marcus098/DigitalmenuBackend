@@ -5,6 +5,7 @@ import com.modules.authmodule.repository.AgencyRepository;
 import com.modules.common.logs.errorlog.ErrorLog;
 import com.modules.mainapp.payment.ApplicationFeeCalculator;
 import com.modules.mainapp.payment.dto.ConnectStatusResponse;
+import com.modules.mainapp.payment.dto.PrepaymentSettings;
 import com.modules.mainapp.payment.stripe.StripeGateway;
 import com.stripe.exception.SignatureVerificationException;
 import com.stripe.exception.StripeException;
@@ -78,6 +79,38 @@ public class StripeConnectService {
     public boolean isPaymentsEnabled(long idAgency) {
         return stripe.isConfigured()
                 && agencyRepository.findByIdAndDeleted(idAgency, false).map(StripeConnectService::canAcceptPayments).orElse(false);
+    }
+
+    // ── Prepagamento ────────────────────────────────────────────────────────
+
+    public PrepaymentSettings getPrepaymentSettings(long idAgency) {
+        AgencyJpa a = requireAgency(idAgency);
+        return new PrepaymentSettings(Boolean.TRUE.equals(a.getPrepaymentTakeaway()),
+                Boolean.TRUE.equals(a.getPrepaymentTable()), stripe.isConfigured() && canAcceptPayments(a));
+    }
+
+    /** @throws ResponseStatusException 400 se si prova ad attivare il prepagamento senza Stripe attivo */
+    @Transactional
+    public PrepaymentSettings updatePrepaymentSettings(long idAgency, boolean takeaway, boolean table) {
+        AgencyJpa a = requireAgency(idAgency);
+        boolean enabled = stripe.isConfigured() && canAcceptPayments(a);
+        if ((takeaway || table) && !enabled) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Attiva prima i pagamenti online con Stripe per richiedere il prepagamento");
+        }
+        a.setPrepaymentTakeaway(takeaway);
+        a.setPrepaymentTable(table);
+        agencyRepository.save(a);
+        return new PrepaymentSettings(takeaway, table, enabled);
+    }
+
+    /** Prepagamento effettivo: impostazione del locale AND pagamenti attivi (se Stripe si disattiva, decade). */
+    public boolean isPrepaymentRequired(long idAgency, boolean takeaway) {
+        if (!stripe.isConfigured()) return false;
+        return agencyRepository.findByIdAndDeleted(idAgency, false)
+                .filter(StripeConnectService::canAcceptPayments)
+                .map(a -> Boolean.TRUE.equals(takeaway ? a.getPrepaymentTakeaway() : a.getPrepaymentTable()))
+                .orElse(false);
     }
 
     public AgencyJpa requireAgency(long idAgency) {

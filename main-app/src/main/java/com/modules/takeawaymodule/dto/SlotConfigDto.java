@@ -12,7 +12,10 @@ import java.util.Map;
 public class SlotConfigDto {
     private int slotDurationMinutes = 15;
     private int maxOrdersPerSlot = 5;
+    /** 0 = nessun limite di prodotti (capacità in ordini). */
     private int maxProductsPerSlot = 20;
+    /** Ordini "su richiesta" oltre maxOrdersPerSlot (0 = nessuna riserva). */
+    private int reserveOrdersPerSlot = 0;
     private Map<String, List<TimeRange>> weeklyHours = new LinkedHashMap<>();
     private List<String> closedDates = new java.util.ArrayList<>();
 
@@ -33,6 +36,8 @@ public class SlotConfigDto {
     public void setMaxOrdersPerSlot(int v) { this.maxOrdersPerSlot = v; }
     public int getMaxProductsPerSlot() { return maxProductsPerSlot; }
     public void setMaxProductsPerSlot(int v) { this.maxProductsPerSlot = v; }
+    public int getReserveOrdersPerSlot() { return reserveOrdersPerSlot; }
+    public void setReserveOrdersPerSlot(int v) { this.reserveOrdersPerSlot = v; }
     public Map<String, List<TimeRange>> getWeeklyHours() { return weeklyHours; }
     public void setWeeklyHours(Map<String, List<TimeRange>> v) { this.weeklyHours = v; }
     public List<String> getClosedDates() { return closedDates; }

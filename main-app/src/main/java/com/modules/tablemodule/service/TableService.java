@@ -211,7 +211,9 @@ public class TableService {
                     EntityLog<?> newLog = new EntityLog<>(LogOperation.OTHER, oldStatus, ComandStatus.COMPLETED, "function deleteTableAndCloseComands for comand " + comand.getId(), idUser, idAgency);
                     comandLogs.add(newLog);
                 }
-                orderUtils.saveAll(comands);
+                // update condizionale (solo status): non sovrascrive paid/paymentIntentId scritti dal webhook
+                orderUtils.updateStatusIfIn(comands.stream().map(Comand::getId).toList(), idAgency,
+                        List.of(ComandStatus.PENDING, ComandStatus.PROGRESS), ComandStatus.COMPLETED);
                 orderUtils.saveAllLogs(comandLogs);
             }
 
@@ -259,7 +261,9 @@ public class TableService {
                     EntityLog<?> newLog = new EntityLog<>(LogOperation.OTHER, oldStatus, ComandStatus.COMPLETED, "function setBusyAndCloseComands for comand " + comand.getId(), idUser, idAgency);
                     comandLogs.add(newLog);
                 }
-                orderUtils.saveAll(comands);
+                // update condizionale (solo status): non sovrascrive paid/paymentIntentId scritti dal webhook
+                orderUtils.updateStatusIfIn(comands.stream().map(Comand::getId).toList(), idAgency,
+                        List.of(ComandStatus.PENDING, ComandStatus.PROGRESS), ComandStatus.COMPLETED);
                 orderUtils.saveAllLogs(comandLogs);
             }
 

@@ -11,6 +11,9 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import com.modules.ordermodule.exception.OrderRejectedException;
+
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 @CrossOrigin(origins = "*")
@@ -43,6 +46,36 @@ public class OrderController {
         } catch (Exception e) {
             ErrorLog.logger.error("Errore ", e);
             return ResponseEntity.status(500).body("Errore");
+        }
+    }
+
+    /** Accetta un ordine "su richiesta" (AWAIT_APPROVAL → PENDING): incassa l'eventuale autorizzazione e stampa. */
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
+    @PostMapping("/{id}/approve")
+    public ResponseEntity<?> approve(@PathVariable("id") String id) {
+        try {
+            orderComandService.approve(id);
+            return ResponseEntity.ok(Map.of("message", "Ordine accettato"));
+        } catch (OrderRejectedException e) {
+            return ResponseEntity.status(e.getStatus()).body(Map.of("message", e.getMessage()));
+        } catch (Exception e) {
+            ErrorLog.logger.error("Errore approvazione comanda " + id, e);
+            return ResponseEntity.status(500).body(Map.of("message", "Errore"));
+        }
+    }
+
+    /** Rifiuta un ordine "su richiesta" (→ DELETED, motivo visibile al cliente, autorizzazione annullata). */
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
+    @PostMapping("/{id}/reject")
+    public ResponseEntity<?> reject(@PathVariable("id") String id, @RequestBody(required = false) Map<String, String> body) {
+        try {
+            orderComandService.reject(id, body != null ? body.get("reason") : null);
+            return ResponseEntity.ok(Map.of("message", "Ordine rifiutato"));
+        } catch (OrderRejectedException e) {
+            return ResponseEntity.status(e.getStatus()).body(Map.of("message", e.getMessage()));
+        } catch (Exception e) {
+            ErrorLog.logger.error("Errore rifiuto comanda " + id, e);
+            return ResponseEntity.status(500).body(Map.of("message", "Errore"));
         }
     }
 }

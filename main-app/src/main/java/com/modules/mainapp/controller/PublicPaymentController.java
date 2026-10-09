@@ -5,6 +5,7 @@ import com.modules.common.logs.errorlog.ErrorLog;
 import com.modules.mainapp.payment.dto.CreatePaymentIntentRequest;
 import com.modules.mainapp.payment.dto.PaymentIntentResponse;
 import com.modules.mainapp.payment.service.PaymentService;
+import com.modules.mainapp.payment.service.StripeConnectService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -21,6 +22,9 @@ public class PublicPaymentController {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private StripeConnectService connectService;
 
     /**
      * Crea il PaymentIntent per una comanda. request.amountCents è IGNORATO: l'importo viene
@@ -55,11 +59,21 @@ public class PublicPaymentController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    /** Il locale accetta pagamenti online? Il client mostra "Paga online" solo se enabled = true. */
+    /**
+     * Il locale accetta pagamenti online? Il client mostra "Paga online" solo se enabled = true.
+     * prepaymentTakeaway / prepaymentTable: pagamento anticipato obbligatorio per il canale (solo se enabled).
+     */
     @GetMapping("/config/{localname}")
     public ResponseEntity<?> config(@PathVariable String localname) {
         return userRepository.findByUsernameAndDeleted(localname, false)
-                .map(user -> ResponseEntity.ok(Map.of("enabled", paymentService.isOnlinePaymentEnabled(user.getIdAgency()))))
+                .map(user -> {
+                    long idAgency = user.getIdAgency();
+                    boolean enabled = paymentService.isOnlinePaymentEnabled(idAgency);
+                    return ResponseEntity.ok(Map.of(
+                            "enabled", enabled,
+                            "prepaymentTakeaway", enabled && connectService.isPrepaymentRequired(idAgency, true),
+                            "prepaymentTable", enabled && connectService.isPrepaymentRequired(idAgency, false)));
+                })
                 .orElse(ResponseEntity.notFound().build());
     }
 }

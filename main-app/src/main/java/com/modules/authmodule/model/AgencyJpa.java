@@ -16,6 +16,9 @@ public class AgencyJpa extends Agency {
     private Boolean stripeDetailsSubmitted;
     /** Commissione piattaforma in basis points (100 = 1%). null = default da stripe.connect.default-fee-bps. */
     private Integer applicationFeeBps;
+    /** Prepagamento online obbligatorio per gli ordini da asporto / al tavolo (null = false). */
+    private Boolean prepaymentTakeaway;
+    private Boolean prepaymentTable;
 
     public AgencyJpa(){
         super();
@@ -212,6 +215,24 @@ public class AgencyJpa extends Agency {
 
     public void setApplicationFeeBps(Integer applicationFeeBps) {
         this.applicationFeeBps = applicationFeeBps;
+    }
+
+    @Column(name = "prepayment_takeaway")
+    public Boolean getPrepaymentTakeaway() {
+        return prepaymentTakeaway;
+    }
+
+    public void setPrepaymentTakeaway(Boolean prepaymentTakeaway) {
+        this.prepaymentTakeaway = prepaymentTakeaway;
+    }
+
+    @Column(name = "prepayment_table")
+    public Boolean getPrepaymentTable() {
+        return prepaymentTable;
+    }
+
+    public void setPrepaymentTable(Boolean prepaymentTable) {
+        this.prepaymentTable = prepaymentTable;
     }
 
     @Override

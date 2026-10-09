@@ -7,11 +7,15 @@ import com.modules.common.model.enums.ComandStatus;
 import com.modules.common.model.enums.ComandWaiterType;
 import com.modules.ordermodule.exception.OrderRejectedException;
 import com.modules.ordermodule.model.ComandJpa;
+import com.modules.takeawaymodule.dto.ClosureDto;
+import com.modules.takeawaymodule.dto.PauseStatusDto;
 import com.modules.takeawaymodule.dto.SlotConfigDto;
 import com.modules.takeawaymodule.dto.SlotDto;
+import com.modules.takeawaymodule.model.TakeawayClosureJpa;
 import com.modules.takeawaymodule.model.TakeawaySlotConfigJpa;
 import com.modules.takeawaymodule.model.TakeawaySlotCounter;
 import com.modules.takeawaymodule.model.TakeawaySlotOverrideJpa;
+import com.modules.takeawaymodule.repository.TakeawayClosureRepository;
 import com.modules.takeawaymodule.repository.TakeawaySlotConfigRepository;
 import com.modules.takeawaymodule.repository.TakeawaySlotOverrideRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -34,8 +38,12 @@ public class TakeawaySlotService {
     private static final DateTimeFormatter HHMM = DateTimeFormatter.ofPattern("HH:mm");
     private static final ObjectMapper JSON = new ObjectMapper();
 
+    public static final String MSG_PAUSED = "L'asporto è momentaneamente sospeso: riprova più tardi";
+    public static final String MSG_DAY_CLOSED = "Il locale non accetta ordini da asporto in questa data";
+
     @Autowired private TakeawaySlotConfigRepository configRepo;
     @Autowired private TakeawaySlotOverrideRepository overrideRepo;
+    @Autowired private TakeawayClosureRepository closureRepo;
     @Autowired private MongoTemplate mongoTemplate;
 
     /** Identifica uno slot prenotato (agency, giorno, orario di inizio slot). */
@@ -43,14 +51,20 @@ public class TakeawaySlotService {
         public String id() {
             return idAgency + "|" + date + "|" + time.format(HHMM);
         }
+        public LocalDateTime start() {
+            return LocalDateTime.of(date, time);
+        }
+    }
+
+    /** Esito della prenotazione: onRequest = posto nella riserva (serve l'approvazione del locale). */
+    public record SlotReservation(SlotKey key, boolean onRequest) {
+        public LocalDateTime slotStart() { return key.start(); }
     }
 
     // ── Config ───────────────────────────────────────────────────────────────
 
     public SlotConfigDto getConfig(long idAgency) {
-        TakeawaySlotConfigJpa entity = configRepo.findByIdAgency(idAgency)
-                .orElseGet(() -> seedDefault(idAgency));
-        return toDto(entity);
+        return toDto(config(idAgency));
     }
 
     @Transactional
@@ -59,7 +73,9 @@ public class TakeawaySlotService {
                 .orElseGet(() -> new TakeawaySlotConfigJpa(idAgency));
         entity.setSlotDurationMinutes(Math.max(5, Math.min(120, dto.getSlotDurationMinutes())));
         entity.setMaxOrdersPerSlot(Math.max(1, dto.getMaxOrdersPerSlot()));
-        entity.setMaxProductsPerSlot(Math.max(1, dto.getMaxProductsPerSlot()));
+        // 0 = limite prodotti disattivato
+        entity.setMaxProductsPerSlot(Math.max(0, dto.getMaxProductsPerSlot()));
+        entity.setReserveOrdersPerSlot(Math.max(0, Math.min(50, dto.getReserveOrdersPerSlot())));
         try {
             entity.setWeeklyHours(JSON.writeValueAsString(dto.getWeeklyHours() != null ? dto.getWeeklyHours() : Map.of()));
             entity.setClosedDates(JSON.writeValueAsString(dto.getClosedDates() != null ? dto.getClosedDates() : List.of()));
@@ -70,17 +86,117 @@ public class TakeawaySlotService {
         return toDto(entity);
     }
 
-    // ── Slot del giorno ──────────────────────────────────────────────────────
+    // ── Sospensione asporto ──────────────────────────────────────────────────
 
-    /** Slot per la dashboard (admin): mostra anche i CLOSED e i PAST. */
-    public List<SlotDto> getSlotsForDay(long idAgency, LocalDate date) {
-        return computeSlots(idAgency, date, false);
+    public PauseStatusDto getPauseStatus(long idAgency) {
+        TakeawaySlotConfigJpa cfg = config(idAgency);
+        boolean active = cfg.isPausedAt(LocalDateTime.now());
+        return new PauseStatusDto(active, active ? cfg.getPausedUntil() : null);
     }
 
-    /** Slot per il cliente pubblico: nasconde i CLOSED/PAST/FULL. */
-    public List<SlotDto> getAvailableSlotsForDay(long idAgency, LocalDate date) {
-        return computeSlots(idAgency, date, true).stream()
-                .filter(s -> s.getStatus() == SlotDto.Status.AVAILABLE)
+    public boolean isPaused(long idAgency) {
+        return config(idAgency).isPausedAt(LocalDateTime.now());
+    }
+
+    /** @param minutes durata della sospensione; null o ≤ 0 = finché non viene ripresa a mano */
+    @Transactional
+    public PauseStatusDto pause(long idAgency, Integer minutes) {
+        TakeawaySlotConfigJpa cfg = config(idAgency);
+        cfg.setPaused(true);
+        cfg.setPausedUntil(minutes != null && minutes > 0
+                ? LocalDateTime.now().plusMinutes(Math.min(minutes, 7 * 24 * 60)) : null);
+        configRepo.save(cfg);
+        return getPauseStatus(idAgency);
+    }
+
+    @Transactional
+    public PauseStatusDto resume(long idAgency) {
+        TakeawaySlotConfigJpa cfg = config(idAgency);
+        cfg.setPaused(false);
+        cfg.setPausedUntil(null);
+        configRepo.save(cfg);
+        return new PauseStatusDto(false, null);
+    }
+
+    // ── Chiusure (giorno / periodo) ──────────────────────────────────────────
+
+    public List<ClosureDto> listClosures(long idAgency) {
+        return closureRepo.findByIdAgencyAndToDateGreaterThanEqualOrderByFromDateAsc(idAgency, LocalDate.now())
+                .stream().map(TakeawaySlotService::toDto).toList();
+    }
+
+    @Transactional
+    public ClosureDto addClosure(long idAgency, LocalDate from, LocalDate to, String note) {
+        if (from == null || to == null || to.isBefore(from)) {
+            throw new OrderRejectedException(400, "Periodo non valido: la data di fine precede quella di inizio");
+        }
+        if (to.isBefore(LocalDate.now())) {
+            throw new OrderRejectedException(400, "Il periodo è già terminato");
+        }
+        if (from.plusDays(366).isBefore(to)) {
+            throw new OrderRejectedException(400, "Il periodo di chiusura non può superare un anno");
+        }
+        String n = note == null || note.isBlank() ? null : note.strip();
+        if (n != null && n.length() > 200) n = n.substring(0, 200);
+        return toDto(closureRepo.save(new TakeawayClosureJpa(idAgency, from, to, n)));
+    }
+
+    @Transactional
+    public boolean deleteClosure(long idAgency, long id) {
+        Optional<TakeawayClosureJpa> c = closureRepo.findByIdAndIdAgency(id, idAgency);
+        c.ifPresent(closureRepo::delete);
+        return c.isPresent();
+    }
+
+    /** Chiude l'intera giornata (chiusura di un solo giorno). Idempotente. */
+    @Transactional
+    public void closeDay(long idAgency, LocalDate date) {
+        if (closureFor(idAgency, date).isPresent() || parseClosedDates(config(idAgency).getClosedDates()).contains(date.toString())) return;
+        closureRepo.save(new TakeawayClosureJpa(idAgency, date, date, null));
+    }
+
+    /**
+     * Riapre la giornata: rimuove le chiusure di un solo giorno e la data dalle chiusure straordinarie della config.
+     * Se il giorno è dentro un periodo di più giorni → 409 (va modificato/eliminato il periodo).
+     */
+    @Transactional
+    public void openDay(long idAgency, LocalDate date) {
+        for (TakeawayClosureJpa c : closureRepo.findByIdAgencyAndFromDateLessThanEqualAndToDateGreaterThanEqual(idAgency, date, date)) {
+            if (c.getFromDate().equals(c.getToDate())) {
+                closureRepo.delete(c);
+            } else {
+                throw new OrderRejectedException(409, "Il giorno fa parte del periodo di chiusura dal "
+                        + c.getFromDate() + " al " + c.getToDate() + ": elimina o modifica il periodo");
+            }
+        }
+        TakeawaySlotConfigJpa cfg = config(idAgency);
+        Set<String> closed = parseClosedDates(cfg.getClosedDates());
+        if (closed.remove(date.toString())) {
+            try {
+                cfg.setClosedDates(JSON.writeValueAsString(new ArrayList<>(closed)));
+                configRepo.save(cfg);
+            } catch (Exception e) {
+                ErrorLog.logger.error("Errore aggiornamento closedDates", e);
+            }
+        }
+    }
+
+    // ── Slot del giorno ──────────────────────────────────────────────────────
+
+    /** Slot per la dashboard (admin): mostra anche CLOSED, PAST, FULL. */
+    public List<SlotDto> getSlotsForDay(long idAgency, LocalDate date) {
+        return computeSlots(idAgency, date, false, true);
+    }
+
+    /**
+     * Slot per il cliente pubblico: solo AVAILABLE e ON_REQUEST. Vuoto se l'asporto è sospeso o il giorno è chiuso.
+     * @param prepayment il locale richiede il prepagamento per l'asporto (limita la riserva a 6 giorni)
+     */
+    public List<SlotDto> getAvailableSlotsForDay(long idAgency, LocalDate date, boolean prepayment) {
+        TakeawaySlotConfigJpa cfg = config(idAgency);
+        boolean reserveAllowed = SlotRules.reserveAllowed(cfg.getReserveOrdersPerSlot(), prepayment, date, LocalDate.now());
+        return computeSlots(idAgency, date, true, reserveAllowed).stream()
+                .filter(s -> s.getStatus() == SlotDto.Status.AVAILABLE || s.getStatus() == SlotDto.Status.ON_REQUEST)
                 .toList();
     }
 
@@ -120,13 +236,26 @@ public class TakeawaySlotService {
 
     // ── Internals ────────────────────────────────────────────────────────────
 
-    private List<SlotDto> computeSlots(long idAgency, LocalDate date, boolean publicView) {
-        TakeawaySlotConfigJpa cfg = configRepo.findByIdAgency(idAgency).orElseGet(() -> seedDefault(idAgency));
+    /** Motivo di chiusura dell'intera giornata ("DAY" / "RANGE"), null se aperta. */
+    private String dayClosedReason(long idAgency, TakeawaySlotConfigJpa cfg, LocalDate date) {
+        if (parseClosedDates(cfg.getClosedDates()).contains(date.toString())) return "DAY";
+        return closureFor(idAgency, date)
+                .map(c -> c.getFromDate().equals(c.getToDate()) ? "DAY" : "RANGE")
+                .orElse(null);
+    }
 
-        // Chiusura straordinaria?
-        Set<String> closedDates = parseClosedDates(cfg.getClosedDates());
-        String dateKey = date.toString();
-        if (closedDates.contains(dateKey)) return List.of();
+    private Optional<TakeawayClosureJpa> closureFor(long idAgency, LocalDate date) {
+        return closureRepo.findByIdAgencyAndFromDateLessThanEqualAndToDateGreaterThanEqual(idAgency, date, date)
+                .stream().findFirst();
+    }
+
+    private List<SlotDto> computeSlots(long idAgency, LocalDate date, boolean publicView, boolean reserveAllowed) {
+        TakeawaySlotConfigJpa cfg = config(idAgency);
+        LocalDateTime now = LocalDateTime.now();
+
+        String dayClosed = dayClosedReason(idAgency, cfg, date);
+        // Il pubblico non vede nulla se l'asporto è sospeso o il giorno è chiuso
+        if (publicView && (dayClosed != null || cfg.isPausedAt(now))) return List.of();
 
         // Range orari per il giorno della settimana
         Map<String, List<SlotConfigDto.TimeRange>> weekly = parseWeeklyHours(cfg.getWeeklyHours());
@@ -142,9 +271,7 @@ public class TakeawaySlotService {
         // Occupazione da ordini Mongo
         Map<LocalTime, int[]> liveCounts = countLiveOrdersBySlot(idAgency, date, cfg.getSlotDurationMinutes());
 
-        // Build dei singoli slot
         List<SlotDto> result = new ArrayList<>();
-        LocalDateTime now = LocalDateTime.now();
         int duration = cfg.getSlotDurationMinutes();
 
         for (SlotConfigDto.TimeRange r : ranges) {
@@ -162,6 +289,7 @@ public class TakeawaySlotService {
                 slot.setTime(t.format(HHMM));
                 slot.setMaxOrders(cfg.getMaxOrdersPerSlot());
                 slot.setMaxProducts(cfg.getMaxProductsPerSlot());
+                slot.setReserveOrders(reserveAllowed ? cfg.getReserveOrdersPerSlot() : 0);
 
                 int[] live = liveCounts.getOrDefault(t, new int[]{0, 0});
                 TakeawaySlotOverrideJpa ov = overrides.get(t);
@@ -172,17 +300,21 @@ public class TakeawaySlotService {
                 slot.setManualOrders(manualOrders);
                 slot.setManualProducts(manualProducts);
 
-                boolean isClosed = ov != null && ov.isClosed();
-                boolean isPast = slotStart.isBefore(now);
-                boolean isFull = slot.getOrderCount() >= slot.getMaxOrders()
-                              || slot.getProductCount() >= slot.getMaxProducts();
+                boolean slotClosed = ov != null && ov.isClosed();
+                SlotRules.Availability a = SlotRules.evaluate(false, slotClosed || dayClosed != null, slotStart, now,
+                        slot.getOrderCount(), slot.getProductCount(), 1,
+                        cfg.getMaxOrdersPerSlot(), cfg.getMaxProductsPerSlot(), cfg.getReserveOrdersPerSlot(), reserveAllowed);
+                switch (a) {
+                    case CLOSED -> {
+                        slot.setStatus(SlotDto.Status.CLOSED);
+                        slot.setClosedReason(dayClosed != null ? dayClosed : "SLOT");
+                    }
+                    case PAST -> slot.setStatus(SlotDto.Status.PAST);
+                    case FULL -> slot.setStatus(SlotDto.Status.FULL);
+                    case ON_REQUEST -> slot.setStatus(SlotDto.Status.ON_REQUEST);
+                    default -> slot.setStatus(SlotDto.Status.AVAILABLE);
+                }
 
-                if (isClosed)      slot.setStatus(SlotDto.Status.CLOSED);
-                else if (isPast)   slot.setStatus(SlotDto.Status.PAST);
-                else if (isFull)   slot.setStatus(SlotDto.Status.FULL);
-                else               slot.setStatus(SlotDto.Status.AVAILABLE);
-
-                // Per la view admin teniamo tutto; per il pubblico filtriamo dopo.
                 result.add(slot);
                 t = t.plusMinutes(duration);
             }
@@ -193,12 +325,15 @@ public class TakeawaySlotService {
     // ── Prenotazione slot (race-safe) ────────────────────────────────────────
 
     /**
-     * Valida l'orario di ritiro di un ordine asporto pubblico ("yyyy-MM-ddTHH:mm") e prenota
-     * atomicamente un posto nello slot. Lancia {@link OrderRejectedException} (409) se lo slot non esiste,
-     * è chiuso, è passato o è pieno; (400) se l'orario è mancante/non valido.
+     * Valida l'orario di ritiro di un ordine asporto pubblico ("yyyy-MM-ddTHH:mm") e prenota atomicamente un posto:
+     * prima nella capacità normale, poi (se consentito) nella riserva "su richiesta".
+     * Lancia {@link OrderRejectedException} 409 se l'asporto è sospeso, il giorno/slot è chiuso, lo slot è passato
+     * o pieno; 400 se l'orario è mancante/non valido.
      * In caso di fallimento successivo del salvataggio dell'ordine chiamare {@link #releaseSlot}.
+     *
+     * @param prepayment il locale richiede il prepagamento (riserva solo per slot entro 6 giorni)
      */
-    public SlotKey reservePublicSlot(long idAgency, String pickupTime, int products) {
+    public SlotReservation reservePublicSlot(long idAgency, String pickupTime, int products, boolean prepayment) {
         if (pickupTime == null || pickupTime.isBlank()) {
             throw new OrderRejectedException(400, "Orario di ritiro mancante");
         }
@@ -213,9 +348,22 @@ public class TakeawaySlotService {
         }
         LocalDate date = pickup.toLocalDate();
         String hhmm = pickup.toLocalTime().format(HHMM);
-        TakeawaySlotConfigJpa cfg = configRepo.findByIdAgency(idAgency).orElseGet(() -> seedDefault(idAgency));
+        TakeawaySlotConfigJpa cfg = config(idAgency);
 
-        SlotDto slot = computeSlots(idAgency, date, true).stream()
+        if (cfg.isPausedAt(LocalDateTime.now())) {
+            throw new OrderRejectedException(409, MSG_PAUSED);
+        }
+        if (parseClosedDates(cfg.getClosedDates()).contains(date.toString())) {
+            throw new OrderRejectedException(409, MSG_DAY_CLOSED);
+        }
+        Optional<TakeawayClosureJpa> closure = closureFor(idAgency, date);
+        if (closure.isPresent()) {
+            String note = closure.get().getNote();
+            throw new OrderRejectedException(409, MSG_DAY_CLOSED + (note != null ? " (" + note + ")" : ""));
+        }
+
+        boolean reserveAllowed = SlotRules.reserveAllowed(cfg.getReserveOrdersPerSlot(), prepayment, date, LocalDate.now());
+        SlotDto slot = computeSlots(idAgency, date, false, reserveAllowed).stream()
                 .filter(s -> hhmm.equals(s.getTime()))
                 .findFirst()
                 .orElseThrow(() -> new OrderRejectedException(409, "L'orario di ritiro selezionato non è disponibile"));
@@ -229,19 +377,38 @@ public class TakeawaySlotService {
         SlotKey key = new SlotKey(idAgency, date, LocalTime.parse(hhmm, HHMM));
         ensureCounter(key, cfg.getSlotDurationMinutes());
 
-        // Capacità residua al netto degli ordini manuali della dashboard.
+        // Capacità normale residua al netto degli ordini manuali della dashboard.
         int maxOnlineOrders = slot.getMaxOrders() - slot.getManualOrders();
-        int maxOnlineProductsBefore = slot.getMaxProducts() - slot.getManualProducts() - products;
-        Query q = new Query(Criteria.where("_id").is(key.id())
-                .and("orders").lt(maxOnlineOrders)
-                .and("products").lte(maxOnlineProductsBefore));
-        Update u = new Update().inc("orders", 1).inc("products", products);
-        TakeawaySlotCounter updated = mongoTemplate.findAndModify(q, u,
-                FindAndModifyOptions.options().returnNew(true), TakeawaySlotCounter.class);
-        if (updated == null) {
-            throw new OrderRejectedException(409, "Lo slot di ritiro selezionato non ha più capacità sufficiente, scegline un altro");
+        Criteria normal = Criteria.where("_id").is(key.id()).and("orders").lt(maxOnlineOrders);
+        if (slot.getMaxProducts() > 0) {
+            normal = normal.and("products").lte(slot.getMaxProducts() - slot.getManualProducts() - products);
         }
-        return key;
+        if (increment(normal, products)) {
+            return new SlotReservation(key, false);
+        }
+        // Riserva "su richiesta": stesso contatore, condizione atomica sul totale normale + riserva.
+        if (reserveAllowed) {
+            Criteria reserve = Criteria.where("_id").is(key.id())
+                    .and("orders").lt(maxOnlineOrders + cfg.getReserveOrdersPerSlot());
+            if (increment(reserve, products)) {
+                return new SlotReservation(key, true);
+            }
+        }
+        throw new OrderRejectedException(409, "Lo slot di ritiro selezionato non ha più capacità sufficiente, scegline un altro");
+    }
+
+    private boolean increment(Criteria condition, int products) {
+        Update u = new Update().inc("orders", 1).inc("products", products);
+        return mongoTemplate.findAndModify(new Query(condition), u,
+                FindAndModifyOptions.options().returnNew(true), TakeawaySlotCounter.class) != null;
+    }
+
+    /** Inizio dello slot di ritiro di una comanda asporto (per la scadenza dell'approvazione). null se non interpretabile. */
+    public LocalDateTime slotStartFor(long idAgency, String time, LocalDateTime createdAt) {
+        LocalDateTime pickup = parsePickup(time, createdAt != null ? createdAt.toLocalDate() : LocalDate.now());
+        if (pickup == null) return null;
+        TakeawaySlotConfigJpa cfg = config(idAgency);
+        return LocalDateTime.of(pickup.toLocalDate(), snapToSlotStart(pickup.toLocalTime(), cfg.getSlotDurationMinutes()));
     }
 
     /**
@@ -252,7 +419,7 @@ public class TakeawaySlotService {
         try {
             LocalDateTime pickup = parsePickup(time, LocalDate.now());
             if (pickup == null) return null;
-            TakeawaySlotConfigJpa cfg = configRepo.findByIdAgency(idAgency).orElseGet(() -> seedDefault(idAgency));
+            TakeawaySlotConfigJpa cfg = config(idAgency);
             SlotKey key = new SlotKey(idAgency, pickup.toLocalDate(),
                     snapToSlotStart(pickup.toLocalTime(), cfg.getSlotDurationMinutes()));
             ensureCounter(key, cfg.getSlotDurationMinutes());
@@ -292,7 +459,7 @@ public class TakeawaySlotService {
         try {
             LocalDateTime pickup = parsePickup(time, createdAt != null ? createdAt.toLocalDate() : LocalDate.now());
             if (pickup == null) return;
-            TakeawaySlotConfigJpa cfg = configRepo.findByIdAgency(idAgency).orElseGet(() -> seedDefault(idAgency));
+            TakeawaySlotConfigJpa cfg = config(idAgency);
             SlotKey key = new SlotKey(idAgency, pickup.toLocalDate(),
                     snapToSlotStart(pickup.toLocalTime(), cfg.getSlotDurationMinutes()));
             if (toDeleted) {
@@ -321,7 +488,8 @@ public class TakeawaySlotService {
     }
 
     /**
-     * Occupazione degli slot di un giorno dai comand Mongo: solo TAKE_AWAY dell'agency, non DELETED,
+     * Occupazione degli slot di un giorno dai comand Mongo: solo TAKE_AWAY dell'agency, non DELETED
+     * (inclusi quelli in attesa di pagamento/approvazione, che tengono occupato il posto),
      * con ritiro nel giorno richiesto (ISO "yyyy-MM-ddTHH:mm", oppure "HH:mm" creato in quel giorno).
      * I COMPLETED restano conteggiati: la capacità rappresenta i ritiri pianificati nello slot.
      */
@@ -376,6 +544,10 @@ public class TakeawaySlotService {
         return LocalTime.of(snapped / 60, snapped % 60);
     }
 
+    private TakeawaySlotConfigJpa config(long idAgency) {
+        return configRepo.findByIdAgency(idAgency).orElseGet(() -> seedDefault(idAgency));
+    }
+
     private TakeawaySlotConfigJpa seedDefault(long idAgency) {
         TakeawaySlotConfigJpa e = new TakeawaySlotConfigJpa(idAgency);
         // Default: pranzo 12-14 + cena 19-23 tutti i giorni tranne lunedì.
@@ -395,11 +567,16 @@ public class TakeawaySlotService {
         return configRepo.save(e);
     }
 
+    private static ClosureDto toDto(TakeawayClosureJpa c) {
+        return new ClosureDto(c.getId(), c.getFromDate().toString(), c.getToDate().toString(), c.getNote());
+    }
+
     private SlotConfigDto toDto(TakeawaySlotConfigJpa e) {
         SlotConfigDto dto = new SlotConfigDto();
         dto.setSlotDurationMinutes(e.getSlotDurationMinutes());
         dto.setMaxOrdersPerSlot(e.getMaxOrdersPerSlot());
         dto.setMaxProductsPerSlot(e.getMaxProductsPerSlot());
+        dto.setReserveOrdersPerSlot(e.getReserveOrdersPerSlot());
         dto.setWeeklyHours(parseWeeklyHours(e.getWeeklyHours()));
         dto.setClosedDates(new ArrayList<>(parseClosedDates(e.getClosedDates())));
         return dto;

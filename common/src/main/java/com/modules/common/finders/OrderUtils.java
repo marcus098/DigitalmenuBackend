@@ -11,4 +11,11 @@ public interface OrderUtils {
     List<Comand> saveAll(List<Comand> comands);
     List<EntityLog<?>> saveAllLogs(List<EntityLog<?>> logs);
 
+    /**
+     * Cambio stato condizionale (solo status + updatedAt): aggiorna le comande indicate dell'agency il cui stato
+     * attuale è tra {@code fromStatuses}. Non sovrascrive gli altri campi (es. paid scritto dal webhook).
+     * @return numero di comande aggiornate
+     */
+    long updateStatusIfIn(List<String> comandIds, long idAgency, List<ComandStatus> fromStatuses, ComandStatus newStatus);
+
 }
