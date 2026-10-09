@@ -27,11 +27,49 @@ public class JwtService {
     @Value("${jwt.application.jwt_expiration_check}")
     private long jwt_expiration_check;
 
+    /** Claim dei token di impersonazione (superadmin che entra come un locale). */
+    public static final String CLAIM_IMP = "imp";
+    public static final String CLAIM_IMP_BY = "impBy";
+    public static final String CLAIM_IMP_BY_EMAIL = "impByEmail";
+    /** Durata fissa dei token di impersonazione: mai rinnovati da /api/user/check. */
+    public static final long IMPERSONATION_EXPIRATION_MS = 60L * 60 * 1000;
+
     public String generateToken(UserDto user) {
+        return generateToken(user, baseClaims(user));
+    }
+
+    private static Map<String, Object> baseClaims(UserDto user) {
         Map<String, Object> extra = new HashMap<>();
         extra.put("email", user.getEmail());
         extra.put("id", user.getId());
-        return generateToken(user, extra);
+        return extra;
+    }
+
+    /**
+     * Token per l'utente {@code user} (admin del locale) emesso da un superadmin: stessi claim del login
+     * (email, id, subject=username, quindi valido anche per webflux/SSE) + imp/impBy/impByEmail, scadenza 60 minuti.
+     */
+    public String generateImpersonationToken(UserDto user, long superadminId, String superadminEmail) {
+        Map<String, Object> extra = baseClaims(user);
+        extra.put(CLAIM_IMP, true);
+        extra.put(CLAIM_IMP_BY, superadminId);
+        extra.put(CLAIM_IMP_BY_EMAIL, superadminEmail);
+        return builToken(user, extra, IMPERSONATION_EXPIRATION_MS);
+    }
+
+    public static boolean isImpersonation(Claims claims) {
+        return claims != null && Boolean.TRUE.equals(claims.get(CLAIM_IMP));
+    }
+
+    /** id del superadmin che ha emesso il token di impersonazione, null se assente/non numerico. */
+    public static Long impersonatedBy(Claims claims) {
+        Object v = claims == null ? null : claims.get(CLAIM_IMP_BY);
+        return v instanceof Number n ? n.longValue() : null;
+    }
+
+    public static String impersonatedByEmail(Claims claims) {
+        Object v = claims == null ? null : claims.get(CLAIM_IMP_BY_EMAIL);
+        return v != null ? v.toString() : null;
     }
 
     public String generateToken(UserDto user, Map<String, Object> extra) {

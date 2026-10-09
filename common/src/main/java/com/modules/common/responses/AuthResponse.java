@@ -1,5 +1,7 @@
 package com.modules.common.responses;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 public class AuthResponse {
     private final long idAgency;
     private int status;
@@ -11,6 +13,8 @@ public class AuthResponse {
     private final boolean isNew;
     private final Long time;
     private final int controlsVariable;
+    /** Email del superadmin che sta usando l'account (token di impersonazione); null = accesso normale, omesso dal JSON. */
+    private String impersonatedBy;
 
     public AuthResponse(int status, String localname, String name, String surname, String email, String accessToken, long idAgency, boolean isNew, Long time, int controlsVariable) {
         this.status = status;
@@ -28,6 +32,15 @@ public class AuthResponse {
     /*public AuthResponse(){
 
     }*/
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public String getImpersonatedBy() {
+        return impersonatedBy;
+    }
+
+    public void setImpersonatedBy(String impersonatedBy) {
+        this.impersonatedBy = impersonatedBy;
+    }
 
     public int getControlsVariable() {
         return controlsVariable;

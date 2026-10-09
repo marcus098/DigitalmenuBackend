@@ -74,6 +74,12 @@ spring.servlet.multipart.max-request-size=15MB
 # BACKUP OBBLIGATORIO: se si perde, tutti i locali devono reinserire le chiavi. Non cambiarla senza ri-cifrare.
 app.secrets.encryption-key=REPLACE_ME
 
+# Superadmin della piattaforma: creato all'avvio se entrambe sono impostate e l'email non esiste ancora.
+# Sovrascritte dal compose (APP_SUPERADMIN_EMAIL / APP_SUPERADMIN_PASSWORD). Password >= 12 caratteri;
+# dopo il primo login svuota la password (non viene mai sovrascritta). Vedi docs/SERVER_DEPLOY.md.
+app.superadmin.email=
+app.superadmin.password=
+
 twilio.enabled=false
 twilio.account-sid=
 twilio.auth-token=

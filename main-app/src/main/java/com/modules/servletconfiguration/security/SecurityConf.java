@@ -69,6 +69,8 @@ public class SecurityConf {
                         .requestMatchers("/api/user/check").authenticated()
                         .requestMatchers("/api/private/images/**").permitAll()
                         .requestMatchers("/api/public/client/getAll").permitAll()
+                        // Pannello della piattaforma: solo superadmin (i token di impersonazione hanno il ruolo del locale)
+                        .requestMatchers("/api/superadmin/**").hasAuthority("ROLE_SUPERADMIN")
                         .anyRequest().authenticated()
 
                 ).sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

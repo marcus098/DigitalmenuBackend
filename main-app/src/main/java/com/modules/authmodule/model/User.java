@@ -29,7 +29,9 @@ public class User implements UserDetails {
     @Column(nullable = false)
     private String role;
 
-    @Column(nullable = false, name = "id_agency")
+    // null solo per i superadmin (amministratori della piattaforma, nessun locale). Hibernate ddl-auto=update non
+    // rimuove il NOT NULL dai DB esistenti: lo fa SuperadminBootstrap prima di creare il primo superadmin.
+    @Column(name = "id_agency")
     private Long idAgency;
 
     @Column(nullable = false, name = "created_at")

@@ -5,6 +5,7 @@ import com.modules.common.finders.UserUtils;
 import com.modules.common.logs.errorlog.ErrorLog;
 import com.modules.common.model.Request;
 import com.modules.servletconfiguration.model.CustomUserDetails;
+import io.jsonwebtoken.Claims;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -32,6 +33,9 @@ public class JwtRequestFilter extends OncePerRequestFilter {
     private UserUtils userService;
     @Autowired
     private JwtService jwtService;
+    @Lazy
+    @Autowired(required = false)
+    private ImpersonationHooks impersonationHooks;
 
 
     //public JwtRequestFilter(HandlerExceptionResolver handlerExceptionResolver, UserService userService, JwtService jwtService) {
@@ -49,6 +53,8 @@ public class JwtRequestFilter extends OncePerRequestFilter {
         }
         // Solo la validazione del token sta nel try: le eccezioni dei controller/filtri a valle
         // non devono essere trasformate in 401.
+        CustomUserDetails impersonated = null;
+        Long impersonatedAgency = null;
         try {
             String jwt = authenticationHeader.substring(7);
             String email = jwtService.extractEmail(jwt);
@@ -56,7 +62,23 @@ public class JwtRequestFilter extends OncePerRequestFilter {
             if (email != null && authentication == null) {
                 UserDto userDto = userService.loadUserByEmail(email);
                 if (jwtService.isTokenValid(jwt, userDto)) {
-                    CustomUserDetails userDetails = new CustomUserDetails(userDto);
+                    Claims claims = jwtService.extractAll(jwt);
+                    CustomUserDetails userDetails;
+                    if (JwtService.isImpersonation(claims)) {
+                        // Token emesso da un superadmin: valido solo finché il superadmin esiste ed è ancora tale.
+                        Long impBy = JwtService.impersonatedBy(claims);
+                        if (impBy == null || impersonationHooks == null || !impersonationHooks.isActiveSuperadmin(impBy)) {
+                            ErrorLog.logger.warn("Token di impersonazione rifiutato (superadmin {} non valido) su {} {}", impBy, request.getMethod(), request.getRequestURI());
+                            SecurityContextHolder.clearContext();
+                            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                            return;
+                        }
+                        userDetails = new CustomUserDetails(userDto, impBy, JwtService.impersonatedByEmail(claims));
+                        impersonated = userDetails;
+                        impersonatedAgency = userDto.getIdAgency() > 0 ? userDto.getIdAgency() : null;
+                    } else {
+                        userDetails = new CustomUserDetails(userDto);
+                    }
                     UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
                             userDetails,
                             null,
@@ -64,7 +86,9 @@ public class JwtRequestFilter extends OncePerRequestFilter {
                     );
                     auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                     SecurityContextHolder.getContext().setAuthentication(auth);
-
+                    if (impersonated != null) {
+                        request.setAttribute(ImpersonationPolicy.REQUEST_ATTR_IMPERSONATED_BY, impersonated.getImpersonatedBy());
+                    }
                 }
             }
         } catch (Exception e) {
@@ -75,7 +99,41 @@ public class JwtRequestFilter extends OncePerRequestFilter {
             return;
         }
 
+        if (impersonated != null && !handleImpersonation(impersonated, impersonatedAgency, request, response)) {
+            return;
+        }
         filterChain.doFilter(request, response);
+    }
+
+    /** Applica {@link ImpersonationPolicy} e registra le richieste mutanti. false = risposta già scritta (403). */
+    private boolean handleImpersonation(CustomUserDetails user, Long idAgency, HttpServletRequest request, HttpServletResponse response) throws IOException {
+        String method = request.getMethod();
+        String path = pathWithinApplication(request);
+        if (ImpersonationPolicy.isBlocked(method, path)) {
+            ErrorLog.logger.warn("Impersonazione: bloccata {} {} (superadmin {}, utente {})", method, path, user.getImpersonatedBy(), user.getId());
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            response.setContentType("application/json");
+            response.setCharacterEncoding("UTF-8");
+            response.getWriter().write("{\"message\":\"" + ImpersonationPolicy.BLOCKED_MESSAGE.replace("\"", "\\\"") + "\"}");
+            return false;
+        }
+        if (ImpersonationPolicy.isMutating(method)) {
+            try {
+                // asincrono: l'audit non deve mai bloccare né rallentare la richiesta
+                impersonationHooks.recordImpersonatedRequest(user.getImpersonatedBy(), user.getImpersonatedByEmail(),
+                        idAgency, method, path, request.getRemoteAddr());
+            } catch (Exception e) {
+                ErrorLog.logger.error("Impersonazione: errore audit {} {}", method, path, e);
+            }
+        }
+        return true;
+    }
+
+    static String pathWithinApplication(HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        String ctx = request.getContextPath();
+        if (uri == null) return "";
+        return ctx != null && !ctx.isEmpty() && uri.startsWith(ctx) ? uri.substring(ctx.length()) : uri;
     }
 
     // Metodo per estrarre il corpo della richiesta

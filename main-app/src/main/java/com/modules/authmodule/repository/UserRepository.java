@@ -16,4 +16,13 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByGeneralOtpAndDeleted(String otp, boolean deleted);
     List<User> findAllByIdAgencyAndDeletedAndRole(long idAgency, boolean deleted, String role);
     Optional<User> findByIdAndGeneralOtpAndEmailConfirmedAndDeleted(long id, String otp, boolean confirmed, boolean deleted);
+
+    // ── superadmin ──
+    /** Qualsiasi utente con questa email, anche eliminato (bootstrap del superadmin). */
+    Optional<User> findFirstByEmail(String email);
+    /** Tutti gli utenti di un locale, anche eliminati, dal più vecchio. */
+    List<User> findAllByIdAgencyOrderByCreatedAtAscIdAsc(Long idAgency);
+    /** Utenti attivi con un ruolo, dal più vecchio (per trovare l'admin "principale" di ogni locale). */
+    List<User> findAllByRoleAndDeletedOrderByCreatedAtAscIdAsc(String role, boolean deleted);
+    Optional<User> findFirstByIdAgencyAndRoleAndDeletedOrderByCreatedAtAscIdAsc(Long idAgency, String role, boolean deleted);
 }

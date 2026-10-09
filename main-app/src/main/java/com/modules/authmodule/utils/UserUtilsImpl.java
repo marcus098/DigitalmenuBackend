@@ -4,6 +4,7 @@ import com.modules.authmodule.model.User;
 import com.modules.authmodule.repository.UserRepository;
 import com.modules.common.dto.UserDto;
 import com.modules.common.finders.UserUtils;
+import com.modules.common.utilities.Constants;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -33,7 +34,8 @@ public class UserUtilsImpl implements UserUtils {
                     u.getEmail(),
                     u.getRole(),
                     u.getPhoneNumber(),
-                    u.getIdAgency(),
+                    // superadmin: nessun locale (null) -> NO_AGENCY, mai NPE nell'unboxing
+                    u.getIdAgency() != null ? u.getIdAgency() : Constants.NO_AGENCY,
                     u.isEmailConfirmed(),
                     u.isNumberConfirmed(),
                     u.getOtpConfirmEmail(),

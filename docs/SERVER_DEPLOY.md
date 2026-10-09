@@ -194,6 +194,32 @@ Requisiti lato server (già coperti dai passi precedenti):
    gli URL dei webhook e per il ritorno del cliente da SumUp.
 3. Nei log del backend **non** deve comparire l'errore `SEGRETI: ...`.
 
+## 8bis. Superadmin (pannello della piattaforma)
+
+Il superadmin (noi) vede tutti i locali, gestisce i dati di abbonamento e le note interne e può entrare come un
+locale ("accesso come supporto", token di 60 minuti, tutto registrato in `superadmin_audit`). Non esiste una
+registrazione: l'utente viene creato dal backend all'avvio.
+
+Solo la **prima volta**:
+
+1. Genera una password robusta (≥ 12 caratteri) e aggiungi le variabili a `.env` (🧑 la password la sceglie/salva
+   l'utente nel password manager; Claude non la stampa):
+   ```bash
+   cd ~/DigitalmenuFrontend
+   grep -q '^APP_SUPERADMIN_EMAIL=' .env || echo 'APP_SUPERADMIN_EMAIL=' >> .env
+   grep -q '^APP_SUPERADMIN_PASSWORD=' .env || echo 'APP_SUPERADMIN_PASSWORD=' >> .env
+   # 🧑 l'utente inserisce l'email e una password, es. generata con:  openssl rand -base64 24
+   ```
+2. Riavvia il backend: `docker compose up -d backend` e controlla nei log
+   `docker compose logs backend | grep SUPERADMIN` → atteso `SUPERADMIN: creato utente <id> (<email>)`.
+   Errori possibili: `password troppo corta` (minimo 12), `esiste già un utente ... con email` (email già usata da
+   un locale: scegline un'altra).
+3. 🧑 Login dalla dashboard con email e password, poi **rimuovi la password da `.env`**
+   (`sed -i 's|^APP_SUPERADMIN_PASSWORD=.*|APP_SUPERADMIN_PASSWORD=|' .env`) e riavvia il backend.
+
+Il bootstrap non sovrascrive mai la password di un utente esistente: rimettere la variabile non la cambia.
+Il nome locale `superadmin` è riservato (collide con la rotta `/superadmin` del frontend).
+
 ## 9. Verifica
 
 ```bash

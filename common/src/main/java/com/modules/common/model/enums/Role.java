@@ -4,7 +4,9 @@ public enum Role {
     ROLE_ADMIN,
     ROLE_USER,
     ROLE_WAITER,
-    ROLE_DELIVERY;
+    ROLE_DELIVERY,
+    /** Amministratore della piattaforma: nessun locale associato. */
+    ROLE_SUPERADMIN;
 
     /**
      * Restituisce il valore dell'enum corrispondente a una stringa.
