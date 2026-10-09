@@ -11,7 +11,6 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
 
-@CrossOrigin(origins = "*")
 @RequestMapping("/api/public/sessions")
 @RestController
 public class TableSessionSseController {

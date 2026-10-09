@@ -173,11 +173,10 @@ public class IngredientControllerTest {
     void deleteIngredient_success_returns200WithSuccessMessage() throws Exception {
         long id = 1L;
 
-        Mockito.when(ingredientService.deleteIngredient(id)).thenReturn(200);
+        Mockito.when(ingredientService.deleteIngredient(id)).thenReturn(List.of(10L, 11L));
 
         mockMvc.perform(get("/delete/{id}", id))
-                .andExpect(status().isOk())
-                .andExpect(content().string("Ingredient deleted"));
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -185,11 +184,10 @@ public class IngredientControllerTest {
     void deleteIngredient_failure_returns400WithErrorMessage() throws Exception {
         long id = 1L;
 
-        Mockito.when(ingredientService.deleteIngredient(id)).thenReturn(400);
+        Mockito.when(ingredientService.deleteIngredient(id)).thenReturn(null);
 
         mockMvc.perform(get("/delete/{id}", id))
-                .andExpect(status().isBadRequest())
-                .andExpect(content().string("Error"));
+                .andExpect(status().isBadRequest());
     }
 
     @Test

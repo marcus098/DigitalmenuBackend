@@ -24,6 +24,12 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+/**
+ * Consuma gli eventi Kafka e li inoltra (aggregati) ai client SSE connessi a QUESTA istanza.
+ * Semantica broadcast: con più repliche webflux ognuna deve avere un group id UNIVOCO
+ * (app.kafka.aggregator-group-id / app.kafka.table-session-group-id, es. "aggregator-group-${HOSTNAME}"),
+ * altrimenti le partizioni vengono divise tra le repliche e alcuni client non ricevono gli aggiornamenti.
+ */
 @Service
 public class AggregatingKafkaConsumer {
 
@@ -46,7 +52,7 @@ public class AggregatingKafkaConsumer {
         this.scheduler = scheduler;
     }
 
-    @KafkaListener(topics = "categories-updated", groupId = "aggregator-group", containerFactory = "kafkaListenerContainerFactory")
+    @KafkaListener(topics = "categories-updated", groupId = "${app.kafka.aggregator-group-id:aggregator-group}", containerFactory = "kafkaListenerContainerFactory")
     public void listenCategoriesBatch(List<String> categoryJsonList) {
         Map<Long, List<CategoryDto>> categoriesByAgency = categoryJsonList.stream()
                 .map(this::deserializeCategory)
@@ -62,13 +68,19 @@ public class AggregatingKafkaConsumer {
         });
     }
 
-    @KafkaListener(topics = "order-updated", groupId = "aggregator-group", containerFactory = "kafkaListenerContainerFactory")
+    @KafkaListener(topics = "order-updated", groupId = "${app.kafka.aggregator-group-id:aggregator-group}", containerFactory = "kafkaListenerContainerFactory")
     public void listenOrdersBatch(List<String> orderJsonList) {
         Map<Long, List<Map<String, Object>>> ordersByAgency = new HashMap<>();
         for (String json : orderJsonList) {
             Map<String, Object> event = parseOrderEvent(json);
-            if (event == null) continue;
+            if (event == null || !(event.get("idAgency") instanceof Number)) continue;
             Long agencyId = ((Number) event.get("idAgency")).longValue();
+            // Lo stream SSE è condiviso con i client pubblici: inoltra SOLO {id, status, idAgency}
+            Map<String, Object> projected = new HashMap<>();
+            projected.put("id", event.get("id"));
+            projected.put("status", event.get("status"));
+            projected.put("idAgency", agencyId);
+            event = projected;
             ordersByAgency.computeIfAbsent(agencyId, k -> new ArrayList<>()).add(event);
         }
         ordersByAgency.forEach((agencyId, orders) -> {
@@ -77,7 +89,7 @@ public class AggregatingKafkaConsumer {
         });
     }
 
-    @KafkaListener(topics = "product-updated", groupId = "aggregator-group", containerFactory = "kafkaListenerContainerFactory")
+    @KafkaListener(topics = "product-updated", groupId = "${app.kafka.aggregator-group-id:aggregator-group}", containerFactory = "kafkaListenerContainerFactory")
     public void listenProductsBatch(List<String> productJsonList) {
         Map<Long, List<ProductDto>> productsByAgency = productJsonList.stream()
                 .map(this::deserializeProduct)

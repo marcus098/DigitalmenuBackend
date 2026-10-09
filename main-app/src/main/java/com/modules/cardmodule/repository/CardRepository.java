@@ -9,6 +9,7 @@ import java.util.Optional;
 
 public interface CardRepository extends JpaRepository<CardJpa, Long> {
     Optional<CardJpa> findByCodeAndDeleted(String code, boolean deleted);
+    Optional<CardJpa> findByCodeAndDeletedAndIdAgency(String code, boolean deleted, long idAgency);
     Optional<CardJpa> findByIdAndDeletedAndIdAgency(long id, boolean deleted, long idAgency);
     Optional<CardJpa> findByIdAndDeleted(long id, boolean deleted);
     List<CardJpa> findAllByIdAgencyAndDeleted(long idAgency, boolean deleted);

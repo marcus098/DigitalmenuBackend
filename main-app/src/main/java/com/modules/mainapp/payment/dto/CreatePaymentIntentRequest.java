@@ -2,6 +2,7 @@ package com.modules.mainapp.payment.dto;
 
 public class CreatePaymentIntentRequest {
     private String comandId;
+    /** IGNORATO lato server (mantenuto per compatibilità col frontend): l'importo è ricalcolato dalla comanda. */
     private long amountCents;
     private Long idTable;
     private String currency;

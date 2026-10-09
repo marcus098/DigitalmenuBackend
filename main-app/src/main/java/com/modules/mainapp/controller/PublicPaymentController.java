@@ -1,14 +1,15 @@
 package com.modules.mainapp.controller;
 
 import com.modules.authmodule.repository.UserRepository;
+import com.modules.common.logs.errorlog.ErrorLog;
 import com.modules.mainapp.payment.dto.CreatePaymentIntentRequest;
 import com.modules.mainapp.payment.dto.PaymentIntentResponse;
 import com.modules.mainapp.payment.service.PaymentService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
-@CrossOrigin(origins = "*")
 @RequestMapping("/api/public/payments")
 @RestController
 public class PublicPaymentController {
@@ -19,14 +20,14 @@ public class PublicPaymentController {
     @Autowired
     private UserRepository userRepository;
 
+    /**
+     * Crea il PaymentIntent per una comanda. request.amountCents è IGNORATO: l'importo viene
+     * ricalcolato lato server e restituito in {@code amountCents}.
+     */
     @PostMapping("/intent/{localname}")
     public ResponseEntity<?> createIntent(
             @PathVariable String localname,
             @RequestBody CreatePaymentIntentRequest request) {
-
-        if (request.getAmountCents() <= 0) {
-            return ResponseEntity.badRequest().body("Importo non valido");
-        }
 
         return userRepository.findByUsernameAndDeleted(localname, false)
                 .map(user -> {
@@ -35,14 +36,16 @@ public class PublicPaymentController {
                                 user.getIdAgency(),
                                 request.getIdTable(),
                                 request.getComandId(),
-                                request.getAmountCents(),
                                 request.getCurrency()
                         );
                         return ResponseEntity.ok(resp);
+                    } catch (ResponseStatusException e) {
+                        return ResponseEntity.status(e.getStatusCode()).body(e.getReason());
                     } catch (IllegalStateException e) {
                         return ResponseEntity.status(503).body(e.getMessage());
                     } catch (Exception e) {
-                        return ResponseEntity.status(500).body("Errore creazione pagamento: " + e.getMessage());
+                        ErrorLog.logger.error("Errore creazione pagamento per locale {}", localname, e);
+                        return ResponseEntity.status(500).body("Errore creazione pagamento");
                     }
                 })
                 .orElse(ResponseEntity.notFound().build());

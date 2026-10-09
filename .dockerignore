@@ -5,3 +5,12 @@
 .idea
 **/.DS_Store
 kafka_docker
+.claude
+
+# Mai includere configurazioni con segreti nell'immagine: fornirle a runtime (env / volume).
+**/src/main/resources/application*.properties
+**/src/main/resources/application*.yml
+**/src/main/resources/application*.yaml
+# ...tranne eventuali template committati senza segreti
+!**/src/main/resources/application*.example.properties
+!**/src/main/resources/application*.template.properties
