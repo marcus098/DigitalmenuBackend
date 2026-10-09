@@ -11,7 +11,7 @@ Prompt suggerito da dare a Claude sul server:
 ## Regole per Claude
 
 1. **Mai stampare segreti** (`cat .env`, `cat config/*/application.properties`, `docker compose config`, `env`).
-   Per controllare che una chiave sia valorizzata usa: `grep -c '^STRIPE_SECRET_KEY=sk_' .env`.
+   Per controllare che una chiave sia valorizzata usa: `grep -c '^APP_SECRETS_ENCRYPTION_KEY=.\+' .env`.
 2. **Mai committare** `.env`, `config/`, `application.properties`. Sul server non si fa `git commit`/`push`.
 3. Prima di `docker compose down -v`, `docker volume rm`, `DROP`, `rm -rf` → **chiedi**. I volumi contengono i dati di produzione.
 4. Se un passo fallisce, diagnostica con i log (`docker compose logs --tail=200 <servizio>`) prima di cambiare configurazione.
@@ -102,11 +102,24 @@ grep -nE '=(|.*REPLACE_ME.*)$' .env | cut -d= -f1
 | `FRONTEND_URL`, `BACKEND_URL`, `WEBFLUX_URL` | `https://app.DOMINIO`, `https://api.DOMINIO`, `https://reactive.DOMINIO` |
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | se c'è già un DB, **devono restare quelli vecchi** |
 | `BUCKET_*` | Backblaze B2 — **chiavi nuove** (le vecchie vanno ruotate) |
-| `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY` | `sk_live_` / `pk_live_` (o `sk_test_`/`pk_test_` per la prova) |
-| `STRIPE_WEBHOOK_SECRET` | webhook "account" → passo 8. **Senza, il backend non parte** |
-| `STRIPE_CONNECT_WEBHOOK_SECRET` | webhook "connected accounts" → passo 8 |
-| `STRIPE_CONNECT_DEFAULT_FEE_BPS` | commissione piattaforma, 100 = 1% (0 = nessuna) |
+| `APP_SECRETS_ENCRYPTION_KEY` | chiave AES-256 che cifra le chiavi di pagamento dei locali (passata al backend dal compose). Generala senza mostrarla (vedi sotto). **Backup obbligatorio**: se si perde, tutti i locali devono reinserire le chiavi. Non cambiarla su un deploy esistente |
 | `BACKUP_S3_BUCKET` | bucket B2 separato per i backup |
+
+Generazione di `APP_SECRETS_ENCRYPTION_KEY` (solo se non c'è già un valore: su un deploy esistente **non** va cambiata):
+
+```bash
+grep -q '^APP_SECRETS_ENCRYPTION_KEY=.\+' .env || {
+  K=$(openssl rand -base64 32)
+  if grep -q '^APP_SECRETS_ENCRYPTION_KEY=' .env; then sed -i "s|^APP_SECRETS_ENCRYPTION_KEY=.*|APP_SECRETS_ENCRYPTION_KEY=$K|" .env
+  else echo "APP_SECRETS_ENCRYPTION_KEY=$K" >> .env; fi
+  unset K; }
+```
+
+🧑 Ricorda all'utente di copiare la chiave in un password manager (`grep '^APP_SECRETS_ENCRYPTION_KEY=' .env` lo
+lancia **lui**, non Claude). Senza la chiave il backend parte ma i pagamenti online restano disattivati.
+
+Le variabili `STRIPE_*` delle versioni precedenti (Stripe Connect) non servono più: se presenti in `.env` si possono
+rimuovere.
 
 Le `REACT_APP_*` vengono "cotte" nel bundle in fase di build: se cambi un URL o la `pk_` devi rifare la build del frontend.
 
@@ -133,7 +146,7 @@ Da fare:
   ```
   ⚠️ Se c'è già un deploy, cambiare la chiave fa sloggare tutti: chiedi 🧑 se preferisce riusare quella vecchia.
 - 🧑 L'utente inserisce credenziali SMTP (password per app Gmail **nuova**) e le credenziali Postgres in `config/webflux` (stesse di `.env`).
-- I valori di datasource/mongo/kafka/stripe/bucket nei file sono sovrascritti dalle variabili del compose: non serve duplicarli.
+- I valori di datasource/mongo/kafka/bucket e `app.secrets.encryption-key` nei file sono sovrascritti dalle variabili del compose: non serve duplicarli.
 
 ## 6. Caddy
 
@@ -159,7 +172,7 @@ Atteso nei log del backend: `Started MainAppApplication`. Errori tipici:
 
 | Errore | Causa |
 |---|---|
-| `Could not resolve placeholder 'stripe.webhook-secret'` | manca `STRIPE_WEBHOOK_SECRET` in `.env` |
+| `SEGRETI: app.secrets.encryption-key ... non impostata` (ERROR, il backend parte comunque) | manca `APP_SECRETS_ENCRYPTION_KEY` in `.env` o il compose non la passa al backend: i pagamenti online restano disattivati |
 | `Could not resolve placeholder 'jwt.application.key'` / `bucket.*.name` | `config/main-app/application.properties` non montato o incompleto |
 | `password authentication failed` | credenziali Postgres diverse da quelle con cui è stato creato il volume |
 | `Connection to kafka:9092 could not be established` | Kafka ancora in avvio: attendi 30s e `docker compose restart backend webflux` |
@@ -167,28 +180,34 @@ Atteso nei log del backend: `Started MainAppApplication`. Errori tipici:
 
 Lo schema DB viene aggiornato da Hibernate (`ddl-auto=update`): nuove tabelle per pagamenti, slot, ecc. vengono create al primo avvio.
 
-## 8. Stripe (🧑 lo fa l'utente sulla dashboard Stripe, Claude guida)
+## 8. Pagamenti online (ogni locale configura il proprio account)
 
-Dettagli completi in `docs/STRIPE_SETUP.md`. In breve:
-1. Attiva **Connect** (tipo Express).
-2. Developers → Webhooks → Add endpoint:
-   - `https://api.DOMINIO/api/payments/webhook` — eventi `payment_intent.succeeded`, `.payment_failed`, `.amount_capturable_updated`, `.canceled`, `charge.refunded` (con Connect + destination charges arrivano sul tuo account) → secret in `STRIPE_WEBHOOK_SECRET`
-   - `https://api.DOMINIO/api/payments/webhook/connect` — "Events on Connected accounts" (`account.updated`) → secret in `STRIPE_CONNECT_WEBHOOK_SECRET`
-3. Dopo aver aggiornato `.env`: `docker compose up -d backend` (ricrea il container con le nuove env).
-4. Ogni ristorante completa l'onboarding da Dashboard → Impostazioni pagamenti.
+Non c'è nessuna configurazione Stripe/SumUp a livello di piattaforma: ogni ristorante incassa sul **proprio**
+account e inserisce le sue chiavi in **Dashboard → Impostazioni pagamenti** (Stripe o SumUp). Le chiavi sono salvate
+cifrate con `APP_SECRETS_ENCRYPTION_KEY`; il webhook Stripe viene creato automaticamente sull'account del locale.
+
+Guida completa da girare ai ristoratori: `docs/PAGAMENTI_SETUP.md`.
+
+Requisiti lato server (già coperti dai passi precedenti):
+1. `APP_SECRETS_ENCRYPTION_KEY` impostata (passo 4) e salvata in un posto sicuro.
+2. `app.public-base-url=https://api.DOMINIO` e `app.frontend-base-url=https://app.DOMINIO` (passo 5): servono per
+   gli URL dei webhook e per il ritorno del cliente da SumUp.
+3. Nei log del backend **non** deve comparire l'errore `SEGRETI: ...`.
 
 ## 9. Verifica
 
 ```bash
 curl -sI https://app.DOMINIO | head -1                                   # 200
 curl -s -o /dev/null -w '%{http_code}\n' https://api.DOMINIO/api/printers/tablet/status   # 401/403 = backend vivo e protetto
-curl -s -o /dev/null -w '%{http_code}\n' -X POST https://api.DOMINIO/api/payments/webhook # 400 = raggiungibile, firma mancante
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -d '{}' https://api.DOMINIO/api/payments/webhook/stripe/token-a-caso   # 400 = raggiungibile, token sconosciuto
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/json' -d '{}' https://api.DOMINIO/api/payments/webhook/sumup/token-a-caso   # 200 = raggiungibile (token sconosciuto ignorato)
 curl -s -N --max-time 5 -o /dev/null -w '%{http_code}\n' https://reactive.DOMINIO/api/auth/admin   # 401 senza token
 ```
 
 Poi 🧑 test manuale dall'utente:
 1. Login dashboard, creare un tavolo, aprire il QR dal telefono, fare un ordine → deve comparire in tempo reale in dashboard.
-2. Pagamento con carta di test Stripe `4242 4242 4242 4242` (solo con chiavi `sk_test_`).
+2. Impostazioni pagamenti: inserire le chiavi Stripe **di test** di un locale (`pk_test_`/`sk_test_`) → deve
+   comparire *Webhook: automatico*; attivare Stripe e pagare un ordine con la carta `4242 4242 4242 4242`.
 3. Stampanti → nuova stampante "Tablet Android (RawBT)" → Stampa di prova.
 
 ## 10. Aggiornamenti successivi
@@ -206,5 +225,7 @@ Ripristino DB dal backup del passo 2: 🧑 sempre su richiesta esplicita.
 ## Cose note ancora aperte
 
 - Nessuna migrazione versionata (si usa `ddl-auto=update`): non rinominare colonne a mano.
-- Un pagamento che arriva per un ordine già annullato viene solo loggato (rimborso manuale da Stripe).
-- La commissione per singolo locale si cambia solo via SQL (`agencies.application_fee_bps`).
+- Un pagamento che arriva per un ordine già annullato viene solo loggato (rimborso manuale dalla dashboard del provider).
+- Le colonne `agencies.stripe_*` / `application_fee_bps` dell'era Stripe Connect restano nel DB ma non sono più usate.
+- I pagamenti creati con Stripe Connect (prima del passaggio agli account dei locali) si rimborsano dalla dashboard
+  Stripe dell'account Connect.

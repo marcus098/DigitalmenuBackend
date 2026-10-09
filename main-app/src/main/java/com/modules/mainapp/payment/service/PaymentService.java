@@ -1,5 +1,7 @@
 package com.modules.mainapp.payment.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.modules.authmodule.model.AgencyJpa;
 import com.modules.common.finders.TableUtils;
 import com.modules.common.logs.errorlog.ErrorLog;
@@ -7,33 +9,27 @@ import com.modules.common.model.Comand;
 import com.modules.common.model.ComandFromTable;
 import com.modules.common.model.ComandFromWaiter;
 import com.modules.common.model.enums.ComandStatus;
-import com.modules.mainapp.payment.ApplicationFeeCalculator;
 import com.modules.mainapp.payment.ComandTotalCalculator;
-import com.modules.mainapp.payment.PaymentAuthorizedEvent;
-import com.modules.mainapp.payment.PaymentCompletedEvent;
-import com.modules.mainapp.payment.PaymentRefundedEvent;
-import com.modules.ordermodule.service.ComandFlowRules;
-import com.modules.ordermodule.service.ComandPaymentOperations;
 import com.modules.mainapp.payment.dto.PaymentIntentResponse;
+import com.modules.mainapp.payment.entity.AgencyPaymentAccountJpa;
 import com.modules.mainapp.payment.entity.PaymentJpa;
+import com.modules.mainapp.payment.entity.PaymentProvider;
 import com.modules.mainapp.payment.repository.PaymentRepository;
 import com.modules.mainapp.payment.stripe.StripeGateway;
+import com.modules.mainapp.payment.sumup.SumUpCheckout;
+import com.modules.mainapp.payment.sumup.SumUpException;
 import com.modules.ordermodule.model.ComandJpa;
 import com.modules.ordermodule.repository.MongoComandRepository;
+import com.modules.ordermodule.service.ComandFlowRules;
+import com.modules.ordermodule.service.ComandPaymentOperations;
 import com.modules.servletconfiguration.security.AuthenticatedUserProvider;
 import com.stripe.exception.SignatureVerificationException;
-import com.stripe.exception.StripeException;
 import com.stripe.model.Charge;
 import com.stripe.model.Event;
+import com.stripe.model.EventDataObjectDeserializer;
 import com.stripe.model.PaymentIntent;
-import com.stripe.model.Refund;
 import com.stripe.model.StripeObject;
-import com.stripe.param.PaymentIntentCreateParams;
-import com.stripe.param.RefundCreateParams;
-import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,6 +41,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+/**
+ * Pagamenti online delle comande, indipendenti dal provider: ogni locale incassa sul PROPRIO account Stripe o SumUp
+ * (la piattaforma non tocca mai i soldi). Le operazioni presso il provider sono in {@link OnlinePaymentProvider},
+ * le transizioni di stato (idempotenti) in {@link PaymentTransitions}.
+ * <p>
+ * Un pagamento resta legato al provider con cui è stato creato: cambiare provider attivo non impedisce incasso,
+ * rimborso o webhook dei pagamenti già aperti.
+ */
 @Service
 public class PaymentService implements ComandPaymentOperations {
 
@@ -54,19 +58,17 @@ public class PaymentService implements ComandPaymentOperations {
     public static final String STATUS_CANCELED = "CANCELED";
     public static final String STATUS_REFUNDED = "REFUNDED";
     public static final String STATUS_PARTIALLY_REFUNDED = "PARTIALLY_REFUNDED";
-    /** Importo autorizzato (capture manuale) in attesa che il locale approvi l'ordine. */
+    /** Importo autorizzato (o, con SumUp, già addebitato) in attesa che il locale approvi l'ordine. */
     public static final String STATUS_AUTHORIZED = "AUTHORIZED";
 
-    /** Stati di un intent ancora pagabile (riusabile o da annullare). */
+    /** Stati di un pagamento ancora pagabile (riusabile o da annullare). */
     static final List<String> OPEN_STATUSES = List.of(STATUS_PENDING, STATUS_FAILED);
-    /** Stati annullabili su Stripe (incluse le autorizzazioni non ancora incassate). */
+    /** Stati annullabili (incluse le autorizzazioni non ancora incassate). */
     static final List<String> CANCELABLE_STATUSES = List.of(STATUS_PENDING, STATUS_FAILED, STATUS_AUTHORIZED);
 
     public static final String PAYMENTS_NOT_ACTIVE = "Pagamenti online non attivi per questo locale";
 
-    /** Obbligatoria: l'avvio fallisce se la proprietà manca (env: STRIPE_WEBHOOK_SECRET). */
-    @Value("${stripe.webhook-secret}")
-    private String webhookSecret;
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     @Autowired
     private PaymentRepository paymentRepository;
@@ -84,39 +86,43 @@ public class PaymentService implements ComandPaymentOperations {
     private TableUtils tableUtils;
 
     @Autowired
-    private ApplicationEventPublisher eventPublisher;
+    private PaymentAccountService accountService;
+
+    @Autowired
+    private PaymentTransitions transitions;
 
     @Autowired
     private StripeGateway stripe;
 
     @Autowired
-    private StripeConnectService connectService;
+    private StripePaymentProvider stripeProvider;
 
-    @PostConstruct
-    void checkWebhookSecret() {
-        if (webhookSecret == null || webhookSecret.isBlank() || !webhookSecret.startsWith("whsec_")) {
-            ErrorLog.logger.error("!!! STRIPE: stripe.webhook-secret mancante o placeholder (atteso 'whsec_...'). "
-                    + "Il webhook /api/payments/webhook rifiuterà ogni evento e i pagamenti NON verranno confermati. !!!");
-        }
+    @Autowired
+    private SumUpPaymentProvider sumupProvider;
+
+    OnlinePaymentProvider providerFor(PaymentProvider p) {
+        return p == PaymentProvider.SUMUP ? sumupProvider : stripeProvider;
     }
 
-    /** Pagamenti online attivi per il locale (piattaforma configurata + account Connect abilitato). */
+    OnlinePaymentProvider providerOf(PaymentJpa p) {
+        return providerFor(p.getProvider());
+    }
+
+    /** Pagamenti online attivi per il locale (provider attivo con credenziali configurate). */
     public boolean isOnlinePaymentEnabled(long idAgency) {
-        return connectService.isPaymentsEnabled(idAgency);
+        return accountService.isOnlinePaymentEnabled(idAgency);
     }
 
     /**
-     * Crea (o riusa) un PaymentIntent per la comanda, come destination charge verso l'account Connect del locale.
-     * L'importo è SEMPRE calcolato lato server.
+     * Crea (o riusa) il pagamento della comanda presso il provider attivo del locale. L'importo è SEMPRE calcolato
+     * lato server.
      *
+     * @param localname nome pubblico del locale (path della richiesta), usato per gli URL di ritorno
      * @throws ResponseStatusException 400 dati mancanti/importo non valido, 404 comanda/tavolo non del locale,
      *                                 409 comanda già pagata/eliminata, pagamenti non attivi o pagamento in corso
-     * @throws IllegalStateException   Stripe non configurato sulla piattaforma (→ 503)
+     * @throws IllegalStateException   credenziali non disponibili (→ 503)
      */
-    public PaymentIntentResponse createIntent(long idAgency, Long idTable, String comandId, String currency) {
-        if (!stripe.isConfigured()) {
-            throw new IllegalStateException("Stripe secret key not configured");
-        }
+    public PaymentIntentResponse createIntent(long idAgency, String localname, Long idTable, String comandId, String currency) {
         if (comandId == null || comandId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "comandId obbligatorio");
         }
@@ -145,18 +151,19 @@ public class PaymentService implements ComandPaymentOperations {
                 && ComandFlowRules.isPaymentExpired(comand.getCreatedAt(), LocalDateTime.now())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Tempo per il pagamento scaduto: ripeti l'ordine");
         }
-        // Ordine nella riserva dello slot con prepagamento: si autorizza soltanto, l'incasso avviene all'approvazione
-        boolean manualCapture = comand.getStatus() == ComandStatus.AWAIT_PAYMENT
+        // Ordine nella riserva dello slot con prepagamento: va approvato dal locale prima dell'incasso definitivo
+        boolean approvalRequired = comand.getStatus() == ComandStatus.AWAIT_PAYMENT
                 && Boolean.TRUE.equals(comand.getApprovalRequired());
         if (Boolean.TRUE.equals(comand.getPaid()) || paymentRepository.existsByComandIdAndStatus(comandId, STATUS_COMPLETED)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Comanda già pagata");
         }
 
-        AgencyJpa agency = connectService.requireAgency(idAgency);
-        if (!StripeConnectService.canAcceptPayments(agency)) {
+        PaymentProvider active = accountService.enabledProvider(idAgency);
+        if (active == PaymentProvider.NONE) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, PAYMENTS_NOT_ACTIVE);
         }
-        String destination = agency.getStripeAccountId();
+        AgencyJpa agency = accountService.requireAgency(idAgency);
+        OnlinePaymentProvider provider = providerFor(active);
 
         long amountCents = comandTotalCalculator.computeTotalCents(comandId);
         if (amountCents <= 0) {
@@ -164,13 +171,17 @@ public class PaymentService implements ComandPaymentOperations {
         }
         String cur = currency != null && !currency.isBlank() ? currency.toLowerCase() : "eur";
 
-        // Riusa un intent aperto con stesso importo/valuta/destinazione (evita intent multipli su reload della pagina);
-        // gli altri intent aperti (importo cambiato, account cambiato) vengono annullati su Stripe.
+        OnlinePaymentProvider.IntentRequest req = new OnlinePaymentProvider.IntentRequest(idAgency,
+                localname != null ? localname : agency.getName(), agency.getName(), comandId, comandTable,
+                amountCents, cur, approvalRequired, paymentRepository.countByComandId(comandId));
+
+        // Riusa un pagamento aperto compatibile (evita pagamenti multipli su reload della pagina); gli altri
+        // (importo cambiato, account o provider cambiato) vengono annullati presso il rispettivo provider.
         List<PaymentJpa> open = paymentRepository.findByComandIdAndStatusInOrderByCreatedAtDesc(comandId, OPEN_STATUSES);
         Optional<PaymentJpa> reusable = open.stream()
                 .filter(p -> p.getIdAgency() == idAgency && p.getAmountCents() == amountCents
-                        && cur.equalsIgnoreCase(p.getCurrency()) && p.getStripeClientSecret() != null
-                        && destination.equals(p.getStripeAccountId()))
+                        && cur.equalsIgnoreCase(p.getCurrency()) && p.getProvider() == active
+                        && provider.canReuse(p, req))
                 .findFirst();
         cancelStale(open.stream().filter(p -> reusable.isEmpty() || p.getId() != reusable.get().getId()).toList());
 
@@ -181,118 +192,56 @@ public class PaymentService implements ComandPaymentOperations {
                 p.setStatus(STATUS_PENDING);
                 paymentRepository.save(p);
             }
-            return new PaymentIntentResponse(p.getStripeClientSecret(), p.getStripePaymentIntentId(), amountCents, manualCapture);
+            return provider.response(p, req);
         }
-
-        long feeCents = ApplicationFeeCalculator.feeCents(amountCents, connectService.effectiveFeeBps(agency));
-
-        PaymentIntentCreateParams.Builder params = PaymentIntentCreateParams.builder()
-                .setAmount(amountCents)
-                .setCurrency(cur)
-                .setAutomaticPaymentMethods(PaymentIntentCreateParams.AutomaticPaymentMethods.builder()
-                        .setEnabled(true).build())
-                // Destination charge: il locale è il merchant of record (suo nome sull'estratto conto)
-                .setOnBehalfOf(destination)
-                .setTransferData(PaymentIntentCreateParams.TransferData.builder().setDestination(destination).build())
-                .setDescription("Ordine " + shortId(comandId) + " - " + agency.getName())
-                .putMetadata("idAgency", String.valueOf(idAgency))
-                .putMetadata("comandId", comandId)
-                .putMetadata("idTable", comandTable != null ? String.valueOf(comandTable) : "");
-        if (feeCents > 0) params.setApplicationFeeAmount(feeCents);
-        if (manualCapture) {
-            params.setCaptureMethod(PaymentIntentCreateParams.CaptureMethod.MANUAL)
-                    .putMetadata("approvalRequired", "true");
-        }
-
-        // Deterministica per (comanda, importo, destinazione, modalità, n. tentativi): un doppio click non crea due intent
-        String idempotencyKey = "pi-" + comandId + "-" + amountCents + "-" + cur + "-" + destination
-                + (manualCapture ? "-manual" : "") + "-" + paymentRepository.countByComandId(comandId);
-
-        try {
-            PaymentIntent intent = stripe.createPaymentIntent(params.build(), idempotencyKey);
-
-            Optional<PaymentJpa> already = paymentRepository.findByStripePaymentIntentId(intent.getId());
-            if (already.isPresent()) {
-                return new PaymentIntentResponse(intent.getClientSecret(), intent.getId(), amountCents, manualCapture);
-            }
-
-            PaymentJpa payment = new PaymentJpa();
-            payment.setIdAgency(idAgency);
-            payment.setIdTable(comandTable);
-            payment.setComandId(comandId);
-            payment.setAmountCents(amountCents);
-            payment.setCurrency(cur);
-            payment.setStripePaymentIntentId(intent.getId());
-            payment.setStripeClientSecret(intent.getClientSecret());
-            payment.setStripeAccountId(destination);
-            payment.setApplicationFeeCents(feeCents);
-            payment.setStatus(STATUS_PENDING);
-            paymentRepository.save(payment);
-
-            return new PaymentIntentResponse(intent.getClientSecret(), intent.getId(), amountCents, manualCapture);
-        } catch (StripeException e) {
-            ErrorLog.logger.error("Stripe: errore creazione PaymentIntent comanda {}", comandId, e);
-            throw new RuntimeException("Stripe error: " + e.getMessage(), e);
-        }
+        return provider.create(req);
     }
 
     /**
-     * Annulla su Stripe gli intent aperti non più validi. Se Stripe rifiuta l'annullamento (es. l'intent è appena
-     * stato pagato e il webhook non è ancora arrivato) NON crea un nuovo intent: 409, così il cliente non paga due volte.
+     * Annulla i pagamenti aperti non più validi. Se il provider rifiuta l'annullamento (es. appena pagato e la notifica
+     * non è ancora arrivata) NON crea un nuovo pagamento: 409, così il cliente non paga due volte.
      */
     private void cancelStale(List<PaymentJpa> stale) {
         for (PaymentJpa p : stale) {
-            if (!cancelIntent(p)) {
+            if (!providerOf(p).cancel(p)) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT,
                         "Un pagamento per questa comanda è in corso: riprova tra qualche secondo");
             }
         }
     }
 
-    /** @return true se l'intent risulta annullato (o era già chiuso su Stripe senza successo) */
-    private boolean cancelIntent(PaymentJpa p) {
-        if (p.getStripePaymentIntentId() == null) {
-            p.setStatus(STATUS_CANCELED);
-            paymentRepository.save(p);
-            return true;
-        }
-        try {
-            PaymentIntent canceled = stripe.cancelPaymentIntent(p.getStripePaymentIntentId());
-            if (!"canceled".equals(canceled.getStatus())) return false;
-        } catch (StripeException e) {
-            ErrorLog.logger.warn("Stripe: impossibile annullare intent {}: {}", p.getStripePaymentIntentId(), e.getMessage());
-            return false;
-        }
-        paymentRepository.updateStatusIfIn(p.getStripePaymentIntentId(), CANCELABLE_STATUSES, STATUS_CANCELED, LocalDateTime.now());
-        return true;
-    }
-
-    /** Comanda eliminata: annulla gli intent ancora aperti o autorizzati (best effort, errori solo loggati). */
+    /** Comanda eliminata: annulla i pagamenti ancora aperti o autorizzati (best effort, errori solo loggati). */
     public void cancelOpenIntentsForComand(String comandId) {
         if (!cancelOpenIntents(comandId)) {
-            ErrorLog.logger.warn("Comanda {} eliminata ma un intent non è annullabile (forse già pagato)", comandId);
+            ErrorLog.logger.warn("Comanda {} eliminata ma un pagamento non è annullabile/rimborsabile (forse già pagato)", comandId);
         }
     }
 
     /**
-     * Annulla gli intent aperti/autorizzati della comanda (un'autorizzazione annullata non costa commissioni).
-     * @return false se almeno un intent non è annullabile (es. appena pagato)
+     * Annulla i pagamenti aperti/autorizzati della comanda (Stripe: un'autorizzazione annullata non costa
+     * commissioni; SumUp: un importo già addebitato viene rimborsato per intero).
+     * @return false se almeno un pagamento non è annullabile (es. appena pagato) o il rimborso è fallito
      */
     @Override
     public boolean cancelOpenIntents(String comandId) {
-        if (comandId == null || !stripe.isConfigured()) return true;
+        if (comandId == null) return true;
         boolean all = true;
         for (PaymentJpa p : paymentRepository.findByComandIdAndStatusInOrderByCreatedAtDesc(comandId, CANCELABLE_STATUSES)) {
-            if (!cancelIntent(p)) all = false;
+            try {
+                if (!providerOf(p).cancel(p)) all = false;
+            } catch (RuntimeException e) {
+                ErrorLog.logger.error("Errore annullamento pagamento {} comanda {}", p.getId(), comandId, e);
+                all = false;
+            }
         }
         return all;
     }
 
     /**
-     * Incassa l'importo autorizzato della comanda (ordine "su richiesta" approvato). Idempotency key per intent:
-     * un doppio click non incassa due volte. Lo stato COMPLETED + paid arrivano dal webhook payment_intent.succeeded.
+     * Incassa l'importo autorizzato della comanda (ordine "su richiesta" approvato).
+     * Stripe: capture (COMPLETED + paid arrivano dal webhook). SumUp: già addebitato, diventa subito COMPLETED.
      *
-     * @return true se incassato (o già incassato), false se non c'è un'autorizzazione valida o Stripe rifiuta
+     * @return true se incassato (o già incassato), false se non c'è un'autorizzazione valida o il provider rifiuta
      */
     @Override
     public boolean captureAuthorized(String comandId) {
@@ -303,24 +252,11 @@ public class PaymentService implements ComandPaymentOperations {
             return paymentRepository.existsByComandIdAndStatus(comandId, STATUS_COMPLETED);
         }
         PaymentJpa p = authorized.get(0);
-        try {
-            PaymentIntent captured = stripe.capturePaymentIntent(p.getStripePaymentIntentId(),
-                    "capture-" + p.getStripePaymentIntentId());
-            boolean ok = "succeeded".equals(captured.getStatus()) || "processing".equals(captured.getStatus());
-            if (!ok) {
-                ErrorLog.logger.error("Stripe: capture intent {} in stato inatteso {}", p.getStripePaymentIntentId(), captured.getStatus());
-            }
-            return ok;
-        } catch (StripeException e) {
-            ErrorLog.logger.error("Stripe: errore capture intent {} comanda {}", p.getStripePaymentIntentId(), comandId, e);
-            return false;
-        }
+        return providerOf(p).capture(p);
     }
 
     /**
-     * Rimborso (totale o parziale) di un pagamento del locale del chiamante. Con destination charge:
-     * reverse_transfer recupera i fondi dal locale e refund_application_fee restituisce la commissione piattaforma.
-     * Lo stato REFUNDED/PARTIALLY_REFUNDED viene impostato dal webhook charge.refunded.
+     * Rimborso (totale o parziale) di un pagamento del locale del chiamante, tramite il provider del pagamento.
      */
     public Map<String, Object> refund(long paymentId, Long requestedCents) {
         long idAgency = authUserProvider.getAgencyId();
@@ -329,144 +265,148 @@ public class PaymentService implements ComandPaymentOperations {
         if (!STATUS_COMPLETED.equals(p.getStatus()) && !STATUS_PARTIALLY_REFUNDED.equals(p.getStatus())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Solo i pagamenti completati possono essere rimborsati");
         }
-        if (!stripe.isConfigured()) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Stripe non configurato");
-        }
         long already = p.getRefundedCents() != null ? p.getRefundedCents() : 0;
         long remaining = p.getAmountCents() - already;
         long amount = requestedCents != null ? requestedCents : remaining;
         if (amount <= 0 || amount > remaining) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Importo rimborso non valido");
         }
-        RefundCreateParams.Builder params = RefundCreateParams.builder()
-                .setPaymentIntent(p.getStripePaymentIntentId())
-                .setAmount(amount)
-                .putMetadata("paymentId", String.valueOf(p.getId()))
-                .putMetadata("comandId", p.getComandId() != null ? p.getComandId() : "");
-        if (p.getStripeAccountId() != null) {
-            // Solo per destination charge (i pagamenti pre-Connect non hanno transfer né fee)
-            params.setReverseTransfer(true).setRefundApplicationFee(true);
-        }
-        try {
-            Refund refund = stripe.createRefund(params.build(), "refund-" + p.getId() + "-" + already + "-" + amount);
-            return Map.of("refundId", refund.getId(), "status", String.valueOf(refund.getStatus()), "amountCents", amount);
-        } catch (StripeException e) {
-            ErrorLog.logger.error("Stripe: errore rimborso pagamento {}", p.getId(), e);
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Errore Stripe: " + e.getMessage());
-        }
+        return providerOf(p).refund(p, amount);
     }
+
+    // ── Webhook Stripe (per locale) ────────────────────────────────────────
 
     /**
-     * Webhook Stripe (account piattaforma). Idempotente: ogni transizione è un UPDATE condizionale sullo stato
-     * di partenza, quindi un evento ricevuto due volte (retry Stripe) o fuori ordine non ripubblica
-     * {@link PaymentCompletedEvent} né riporta indietro uno stato (es. REFUNDED → COMPLETED).
+     * Webhook Stripe dell'account del locale identificato da {@code webhookToken}, firmato con il suo webhook secret.
+     * Idempotente (vedi {@link PaymentTransitions}).
      *
-     * @throws SignatureVerificationException firma non valida (→ 400)
+     * @throws SignatureVerificationException token sconosciuto, secret assente o firma non valida (→ 400)
      */
     @Transactional
-    public void handleWebhook(String payload, String sigHeader) throws SignatureVerificationException {
-        if (webhookSecret == null || webhookSecret.isBlank()) {
-            throw new SignatureVerificationException("Webhook secret not configured", sigHeader);
-        }
-        Event event = stripe.constructEvent(payload, sigHeader, webhookSecret);
-        processEvent(event);
+    public void handleStripeWebhook(String webhookToken, String payload, String sigHeader) throws SignatureVerificationException {
+        AgencyPaymentAccountJpa account = accountService.findByWebhookToken(webhookToken)
+                .orElseThrow(() -> new SignatureVerificationException("Unknown webhook token", sigHeader));
+        String secret = accountService.stripeWebhookSecret(account)
+                .orElseThrow(() -> new SignatureVerificationException("Webhook secret not configured", sigHeader));
+        Event event = stripe.constructEvent(payload, sigHeader, secret);
+        processStripeEvent(account.getIdAgency(), event);
     }
 
-    /** Visibile per i test: elabora un evento già verificato. */
-    void processEvent(Event event) {
+    /** Visibile per i test: elabora un evento già verificato dell'account del locale idAgency. */
+    void processStripeEvent(long idAgency, Event event) {
         switch (event.getType()) {
-            case "payment_intent.succeeded" -> {
-                PaymentIntent intent = asIntent(event);
-                if (intent != null) onSucceeded(intent);
-            }
-            case "payment_intent.payment_failed" -> {
-                PaymentIntent intent = asIntent(event);
-                if (intent != null) {
-                    paymentRepository.updateStatusIfIn(intent.getId(), List.of(STATUS_PENDING), STATUS_FAILED, LocalDateTime.now());
+            case "payment_intent.succeeded" -> withIntent(idAgency, event, (p, pi) -> transitions.onSucceeded(p, pi.getAmount()));
+            case "payment_intent.payment_failed" -> withIntent(idAgency, event, (p, pi) -> transitions.onFailed(p));
+            case "payment_intent.amount_capturable_updated" -> withIntent(idAgency, event, (p, pi) -> {
+                if (pi.getAmountCapturable() != null && pi.getAmountCapturable() > 0) {
+                    transitions.onAuthorized(p, pi.getAmountCapturable(), false);
                 }
-            }
-            case "payment_intent.amount_capturable_updated" -> {
-                PaymentIntent intent = asIntent(event);
-                if (intent != null) onAuthorized(intent);
-            }
-            case "payment_intent.canceled" -> {
-                PaymentIntent intent = asIntent(event);
-                if (intent != null) {
-                    paymentRepository.updateStatusIfIn(intent.getId(), CANCELABLE_STATUSES, STATUS_CANCELED, LocalDateTime.now());
-                }
-            }
+            });
+            case "payment_intent.canceled" -> withIntent(idAgency, event, (p, pi) -> transitions.onCanceled(p));
             case "charge.refunded" -> {
-                StripeObject obj = StripeConnectService.deserialize(event);
-                if (obj instanceof Charge charge) onRefunded(charge);
+                if (deserialize(event) instanceof Charge charge && charge.getPaymentIntent() != null) {
+                    findStripePayment(idAgency, charge.getPaymentIntent()).ifPresent(p -> transitions.onRefunded(p,
+                            charge.getAmountRefunded() != null ? charge.getAmountRefunded() : 0,
+                            Boolean.TRUE.equals(charge.getRefunded())));
+                }
             }
             default -> { /* evento non gestito: 200 per non far ritentare Stripe */ }
         }
     }
 
+    private interface IntentHandler {
+        void handle(PaymentJpa p, PaymentIntent intent);
+    }
+
+    private void withIntent(long idAgency, Event event, IntentHandler handler) {
+        if (!(deserialize(event) instanceof PaymentIntent pi) || pi.getId() == null) return;
+        findStripePayment(idAgency, pi.getId()).ifPresentOrElse(p -> handler.handle(p, pi),
+                () -> ErrorLog.logger.info("Stripe webhook: intent {} sconosciuto per il locale {}, ignorato", pi.getId(), idAgency));
+    }
+
+    /** Solo pagamenti del locale a cui appartiene il webhook (un account non può toccare i pagamenti di altri). */
+    private Optional<PaymentJpa> findStripePayment(long idAgency, String intentId) {
+        return paymentRepository.findByStripePaymentIntentId(intentId).filter(p -> p.getIdAgency() == idAgency);
+    }
+
+    static StripeObject deserialize(Event event) {
+        EventDataObjectDeserializer deserializer = event.getDataObjectDeserializer();
+        StripeObject obj = deserializer.getObject().orElse(null);
+        if (obj == null) {
+            // Versione API dell'evento diversa da quella della libreria: deserializza comunque
+            try {
+                obj = deserializer.deserializeUnsafe();
+            } catch (Exception e) {
+                throw new IllegalStateException("Impossibile deserializzare l'evento Stripe " + event.getId(), e);
+            }
+        }
+        return obj;
+    }
+
+    // ── SumUp: webhook e sincronizzazione ──────────────────────────────────
+
     /**
-     * Autorizzazione completata (capture manuale, intent in requires_capture): PENDING/FAILED → AUTHORIZED con update
-     * condizionale, quindi {@link PaymentAuthorizedEvent} una sola volta (la comanda passa in "Da approvare").
+     * Webhook SumUp (NON firmato, corpo {event_type, id}): il corpo serve solo a sapere QUALE checkout rileggere;
+     * lo stato si legge sempre da SumUp con la chiave del locale. Token/checkout sconosciuti vengono ignorati.
+     *
+     * @throws SumUpException errore transitorio di SumUp (→ 5xx, SumUp ritenterà)
      */
-    private void onAuthorized(PaymentIntent intent) {
-        if (intent.getAmountCapturable() == null || intent.getAmountCapturable() <= 0) return;
-        int updated = paymentRepository.updateStatusIfIn(intent.getId(),
-                List.of(STATUS_PENDING, STATUS_FAILED), STATUS_AUTHORIZED, LocalDateTime.now());
-        if (updated == 0) {
-            ErrorLog.logger.info("Stripe webhook: intent {} già autorizzato/chiuso o sconosciuto, ignorato", intent.getId());
+    public void handleSumUpWebhook(String webhookToken, String body) throws SumUpException {
+        Optional<AgencyPaymentAccountJpa> account = accountService.findByWebhookToken(webhookToken);
+        if (account.isEmpty()) {
+            ErrorLog.logger.info("SumUp webhook: token sconosciuto, ignorato");
             return;
         }
-        paymentRepository.findByStripePaymentIntentId(intent.getId()).ifPresent(p -> {
-            if (p.getComandId() != null && !p.getComandId().isBlank()) {
-                eventPublisher.publishEvent(new PaymentAuthorizedEvent(
-                        p.getComandId(), String.valueOf(p.getIdAgency()), intent.getAmountCapturable(), intent.getId()));
-            }
-        });
-    }
-
-    private void onSucceeded(PaymentIntent intent) {
-        int updated = paymentRepository.updateStatusIfIn(intent.getId(),
-                List.of(STATUS_PENDING, STATUS_FAILED, STATUS_CANCELED, STATUS_AUTHORIZED), STATUS_COMPLETED, LocalDateTime.now());
-        if (updated == 0) {
-            ErrorLog.logger.info("Stripe webhook: intent {} già COMPLETED/rimborsato o sconosciuto, ignorato", intent.getId());
+        String checkoutId;
+        try {
+            JsonNode n = JSON.readTree(body == null ? "" : body);
+            checkoutId = n != null && n.hasNonNull("id") ? n.get("id").asText() : null;
+        } catch (Exception e) {
+            ErrorLog.logger.info("SumUp webhook: corpo non valido, ignorato");
             return;
         }
-        paymentRepository.findByStripePaymentIntentId(intent.getId()).ifPresent(p -> {
-            if (intent.getAmount() != null && intent.getAmount() != p.getAmountCents()) {
-                ErrorLog.logger.error("Stripe webhook: importo intent {} ({}) diverso da quello atteso ({})",
-                        intent.getId(), intent.getAmount(), p.getAmountCents());
-            }
-            if (p.getComandId() != null && !p.getComandId().isBlank()) {
-                eventPublisher.publishEvent(new PaymentCompletedEvent(
-                        p.getComandId(), String.valueOf(p.getIdAgency()), p.getAmountCents(), intent.getId()));
-            }
-        });
+        if (checkoutId == null || checkoutId.isBlank()) return;
+        long idAgency = account.get().getIdAgency();
+        Optional<PaymentJpa> payment = paymentRepository.findBySumupCheckoutId(checkoutId)
+                .filter(p -> p.getIdAgency() == idAgency);
+        if (payment.isEmpty()) {
+            ErrorLog.logger.info("SumUp webhook: checkout {} sconosciuto per il locale {}, ignorato", checkoutId, idAgency);
+            return;
+        }
+        try {
+            sumupProvider.refresh(payment.get());
+        } catch (SumUpException e) {
+            if (e.isTransient()) throw e;
+            ErrorLog.logger.warn("SumUp webhook: impossibile leggere il checkout {}: {}", checkoutId, e.getMessage());
+        } catch (IllegalStateException e) {
+            ErrorLog.logger.warn("SumUp webhook: checkout {} del locale {} non verificabile: {}", checkoutId, idAgency, e.getMessage());
+        }
     }
 
-    private void onRefunded(Charge charge) {
-        String intentId = charge.getPaymentIntent();
-        if (intentId == null) return;
-        paymentRepository.findByStripePaymentIntentId(intentId).ifPresent(p -> {
-            long refunded = charge.getAmountRefunded() != null ? charge.getAmountRefunded() : 0;
-            long previous = p.getRefundedCents() != null ? p.getRefundedCents() : 0;
-            // amount_refunded è cumulativo: si tiene il massimo (eventi fuori ordine non fanno regredire)
-            long total = Math.max(refunded, previous);
-            p.setRefundedCents(total);
-            boolean full = total >= p.getAmountCents() || Boolean.TRUE.equals(charge.getRefunded());
-            p.setStatus(full ? STATUS_REFUNDED : STATUS_PARTIALLY_REFUNDED);
-            paymentRepository.save(p);
-            if (p.getComandId() != null && !p.getComandId().isBlank()) {
-                eventPublisher.publishEvent(new PaymentRefundedEvent(
-                        p.getComandId(), String.valueOf(p.getIdAgency()), total, full));
-            }
-        });
+    /**
+     * Sincronizzazione richiesta dal cliente al ritorno dal checkout SumUp.
+     *
+     * @return {status: PENDING|PAID|FAILED|EXPIRED, comandId}
+     * @throws ResponseStatusException 404 checkout non del locale, 409 SumUp non configurato, 502 errore SumUp
+     */
+    public Map<String, Object> syncSumUpCheckout(long idAgency, String checkoutId) {
+        PaymentJpa p = paymentRepository.findBySumupCheckoutId(checkoutId)
+                .filter(x -> x.getIdAgency() == idAgency)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Pagamento non trovato"));
+        try {
+            SumUpCheckout co = sumupProvider.refresh(p);
+            return Map.of("status", co.normalizedStatus(), "comandId", p.getComandId() != null ? p.getComandId() : "");
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, PAYMENTS_NOT_ACTIVE);
+        } catch (SumUpException e) {
+            ErrorLog.logger.warn("SumUp sync: errore lettura checkout {}: {}", checkoutId, e.getMessage());
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "SumUp non raggiungibile: riprova tra qualche secondo");
+        }
     }
 
-    private PaymentIntent asIntent(Event event) {
-        StripeObject obj = StripeConnectService.deserialize(event);
-        return obj instanceof PaymentIntent pi ? pi : null;
-    }
+    // ── Utility / dashboard ────────────────────────────────────────────────
 
-    private static String shortId(String comandId) {
+    static String shortId(String comandId) {
         int i = comandId.indexOf('_');
         String s = i > 0 ? comandId.substring(0, i) : comandId;
         return s.length() > 8 ? s.substring(0, 8) : s;

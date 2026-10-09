@@ -1,7 +1,7 @@
 # main-app — configurazione di PRODUZIONE (template).
 # Copia in ~/DigitalmenuFrontend/config/main-app/application.properties sul server (chmod 600).
 # Il docker-compose la monta in /config/ e la carica con SPRING_CONFIG_ADDITIONAL_LOCATION.
-# Le variabili d'ambiente del docker-compose (datasource, mongo, kafka, stripe, bucket, URL)
+# Le variabili d'ambiente del docker-compose (datasource, mongo, kafka, bucket, chiave di cifratura, URL)
 # hanno precedenza su questo file: qui servono soprattutto le chiavi che il compose non passa.
 # NON committare mai il file compilato.
 
@@ -69,11 +69,10 @@ mail.smtp.ssl.trust=smtp.gmail.com
 spring.servlet.multipart.max-file-size=10MB
 spring.servlet.multipart.max-request-size=15MB
 
-# Stripe — sovrascritte dal compose (STRIPE_*). Vedi docs/STRIPE_SETUP.md
-stripe.secret-key=REPLACE_ME
-stripe.webhook-secret=REPLACE_ME
-stripe.connect-webhook-secret=REPLACE_ME
-stripe.connect.default-fee-bps=0
+# Cifratura delle chiavi di pagamento dei locali (Stripe/SumUp del locale, AES-256-GCM). Vedi docs/PAGAMENTI_SETUP.md
+# Base64 di 32 byte: openssl rand -base64 32. Sovrascritta dal compose (APP_SECRETS_ENCRYPTION_KEY).
+# BACKUP OBBLIGATORIO: se si perde, tutti i locali devono reinserire le chiavi. Non cambiarla senza ri-cifrare.
+app.secrets.encryption-key=REPLACE_ME
 
 twilio.enabled=false
 twilio.account-sid=

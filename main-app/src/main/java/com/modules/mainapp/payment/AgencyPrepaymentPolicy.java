@@ -1,21 +1,21 @@
 package com.modules.mainapp.payment;
 
-import com.modules.mainapp.payment.service.StripeConnectService;
+import com.modules.mainapp.payment.service.PaymentAccountService;
 import com.modules.ordermodule.service.PrepaymentPolicy;
 import org.springframework.stereotype.Component;
 
-/** Prepagamento richiesto = impostazione del locale per il canale AND pagamenti Stripe attivi. */
+/** Prepagamento richiesto = impostazione del locale per il canale AND provider di pagamento online attivo (Stripe o SumUp). */
 @Component
 public class AgencyPrepaymentPolicy implements PrepaymentPolicy {
 
-    private final StripeConnectService connectService;
+    private final PaymentAccountService accountService;
 
-    public AgencyPrepaymentPolicy(StripeConnectService connectService) {
-        this.connectService = connectService;
+    public AgencyPrepaymentPolicy(PaymentAccountService accountService) {
+        this.accountService = accountService;
     }
 
     @Override
     public boolean requiresPrepayment(long idAgency, Channel channel) {
-        return connectService.isPrepaymentRequired(idAgency, channel == Channel.TAKEAWAY);
+        return accountService.isPrepaymentRequired(idAgency, channel == Channel.TAKEAWAY);
     }
 }

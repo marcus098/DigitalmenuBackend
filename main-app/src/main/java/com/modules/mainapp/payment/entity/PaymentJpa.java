@@ -33,17 +33,46 @@ public class PaymentJpa {
     @Column(name = "stripe_client_secret", length = 500)
     private String stripeClientSecret;
 
-    /** Account Connect di destinazione (locale) al momento della creazione dell'intent. */
+    /** Account Stripe del locale al momento della creazione dell'intent (per i pagamenti pre-2026-10: account Connect). */
     @Column(name = "stripe_account_id")
     private String stripeAccountId;
 
-    /** Commissione piattaforma trattenuta (application_fee_amount), in centesimi. */
+    /** @deprecated commissione piattaforma dell'era Stripe Connect: non più valorizzata (nessuna commissione). */
+    @Deprecated
     @Column(name = "application_fee_cents")
     private Long applicationFeeCents;
 
     /** Totale rimborsato (da charge.refunded), in centesimi. */
     @Column(name = "refunded_cents")
     private Long refundedCents;
+
+    /** Provider del pagamento. null = STRIPE (righe create prima dell'introduzione di SumUp). */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "provider", length = 16)
+    private PaymentProvider provider;
+
+    @Column(name = "sumup_checkout_id")
+    private String sumupCheckoutId;
+
+    @Column(name = "sumup_transaction_id")
+    private String sumupTransactionId;
+
+    @Column(name = "sumup_merchant_code", length = 64)
+    private String sumupMerchantCode;
+
+    @Column(name = "sumup_hosted_checkout_url", length = 1000)
+    private String sumupHostedCheckoutUrl;
+
+    /** Ordine nella riserva dello slot: va approvato dal locale prima dell'incasso definitivo. */
+    @Column(name = "approval_required")
+    private Boolean approvalRequired;
+
+    /**
+     * true = importo già addebitato al cliente mentre il pagamento è AUTHORIZED (SumUp non ha pre-autorizzazione):
+     * all'approvazione diventa COMPLETED senza chiamate, al rifiuto viene rimborsato.
+     */
+    @Column(name = "captured_upfront")
+    private Boolean capturedUpfront;
 
     @Column(name = "status", nullable = false)
     private String status = "PENDING";
@@ -66,6 +95,8 @@ public class PaymentJpa {
     }
 
     public long getId() { return id; }
+    /** Solo per test / costruzione manuale. */
+    public void setId(long id) { this.id = id; }
     public long getIdAgency() { return idAgency; }
     public void setIdAgency(long idAgency) { this.idAgency = idAgency; }
     public Long getIdTable() { return idTable; }
@@ -90,6 +121,28 @@ public class PaymentJpa {
     public void setRefundedCents(Long refundedCents) { this.refundedCents = refundedCents; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+    public PaymentProvider getProvider() { return provider != null ? provider : PaymentProvider.STRIPE; }
+    public void setProvider(PaymentProvider provider) { this.provider = provider; }
+    public String getSumupCheckoutId() { return sumupCheckoutId; }
+    public void setSumupCheckoutId(String v) { this.sumupCheckoutId = v; }
+    public String getSumupTransactionId() { return sumupTransactionId; }
+    public void setSumupTransactionId(String v) { this.sumupTransactionId = v; }
+    @JsonIgnore
+    public String getSumupMerchantCode() { return sumupMerchantCode; }
+    public void setSumupMerchantCode(String v) { this.sumupMerchantCode = v; }
+    @JsonIgnore
+    public String getSumupHostedCheckoutUrl() { return sumupHostedCheckoutUrl; }
+    public void setSumupHostedCheckoutUrl(String v) { this.sumupHostedCheckoutUrl = v; }
+    public Boolean getApprovalRequired() { return approvalRequired; }
+    public void setApprovalRequired(Boolean v) { this.approvalRequired = v; }
+    public Boolean getCapturedUpfront() { return capturedUpfront; }
+    public void setCapturedUpfront(Boolean v) { this.capturedUpfront = v; }
+
+    /** Id del pagamento presso il provider (PaymentIntent Stripe o checkout SumUp). */
+    public String externalRef() {
+        return getProvider() == PaymentProvider.SUMUP ? sumupCheckoutId : stripePaymentIntentId;
+    }
+
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
 }

@@ -44,12 +44,13 @@ public class SecurityConf {
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/login").permitAll()
                         .requestMatchers("/api/public/**").permitAll()
-                        // Webhook Stripe: nessun JWT, autenticato tramite firma Stripe-Signature (PaymentService)
-                        .requestMatchers(HttpMethod.POST, "/api/payments/webhook").permitAll()
+                        // Webhook dei provider di pagamento: nessun JWT. Stripe: firma Stripe-Signature con il secret del
+                        // locale (token nel path); SumUp: non firmato, lo stato viene sempre riletto da SumUp.
+                        .requestMatchers(HttpMethod.POST, "/api/payments/webhook/stripe/*").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/payments/webhook/sumup/*").permitAll()
                         // Stampanti: autenticate dal device token nel path
                         .requestMatchers("/api/printers/cloudprnt/**").permitAll()
                         .requestMatchers("/api/printers/bridge/**").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/payments/webhook/connect").permitAll()
                         .requestMatchers("/api/getAgencyName/**").permitAll()
                         .requestMatchers("/api/signupAgency").permitAll()
                         .requestMatchers("/api/signupWaiter").permitAll()
