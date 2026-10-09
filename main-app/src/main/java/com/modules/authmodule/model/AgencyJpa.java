@@ -10,6 +10,13 @@ import java.time.OffsetDateTime;
 public class AgencyJpa extends Agency {
     //todo modificare per fargli gestire solo i dati dell'abbonamento e non gli stili
 
+    // ── Stripe Connect (account Express del locale). Wrapper nullable: colonne aggiunte da ddl-auto=update. ──
+    private String stripeAccountId;
+    private Boolean stripeChargesEnabled;
+    private Boolean stripeDetailsSubmitted;
+    /** Commissione piattaforma in basis points (100 = 1%). null = default da stripe.connect.default-fee-bps. */
+    private Integer applicationFeeBps;
+
     public AgencyJpa(){
         super();
     }
@@ -169,6 +176,42 @@ public class AgencyJpa extends Agency {
     @Override
     public void setWaitersUrl(String waitersUrl) {
         super.setWaitersUrl(waitersUrl);
+    }
+
+    @Column(name = "stripe_account_id")
+    public String getStripeAccountId() {
+        return stripeAccountId;
+    }
+
+    public void setStripeAccountId(String stripeAccountId) {
+        this.stripeAccountId = stripeAccountId;
+    }
+
+    @Column(name = "stripe_charges_enabled")
+    public Boolean getStripeChargesEnabled() {
+        return stripeChargesEnabled;
+    }
+
+    public void setStripeChargesEnabled(Boolean stripeChargesEnabled) {
+        this.stripeChargesEnabled = stripeChargesEnabled;
+    }
+
+    @Column(name = "stripe_details_submitted")
+    public Boolean getStripeDetailsSubmitted() {
+        return stripeDetailsSubmitted;
+    }
+
+    public void setStripeDetailsSubmitted(Boolean stripeDetailsSubmitted) {
+        this.stripeDetailsSubmitted = stripeDetailsSubmitted;
+    }
+
+    @Column(name = "application_fee_bps")
+    public Integer getApplicationFeeBps() {
+        return applicationFeeBps;
+    }
+
+    public void setApplicationFeeBps(Integer applicationFeeBps) {
+        this.applicationFeeBps = applicationFeeBps;
     }
 
     @Override

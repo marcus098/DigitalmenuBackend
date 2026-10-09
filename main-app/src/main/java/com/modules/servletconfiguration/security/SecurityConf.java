@@ -46,6 +46,7 @@ public class SecurityConf {
                         .requestMatchers("/api/public/**").permitAll()
                         // Webhook Stripe: nessun JWT, autenticato tramite firma Stripe-Signature (PaymentService)
                         .requestMatchers(HttpMethod.POST, "/api/payments/webhook").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/payments/webhook/connect").permitAll()
                         .requestMatchers("/api/getAgencyName/**").permitAll()
                         .requestMatchers("/api/signupAgency").permitAll()
                         .requestMatchers("/api/signupWaiter").permitAll()

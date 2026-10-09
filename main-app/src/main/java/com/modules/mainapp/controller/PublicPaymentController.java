@@ -10,6 +10,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.Map;
+
 @RequestMapping("/api/public/payments")
 @RestController
 public class PublicPaymentController {
@@ -40,14 +42,24 @@ public class PublicPaymentController {
                         );
                         return ResponseEntity.ok(resp);
                     } catch (ResponseStatusException e) {
-                        return ResponseEntity.status(e.getStatusCode()).body(e.getReason());
+                        return ResponseEntity.status(e.getStatusCode()).body(Map.of("message",
+                                e.getReason() != null ? e.getReason() : "Errore"));
                     } catch (IllegalStateException e) {
-                        return ResponseEntity.status(503).body(e.getMessage());
+                        return ResponseEntity.status(503).body(Map.of("message",
+                                "Pagamenti online temporaneamente non disponibili"));
                     } catch (Exception e) {
                         ErrorLog.logger.error("Errore creazione pagamento per locale {}", localname, e);
-                        return ResponseEntity.status(500).body("Errore creazione pagamento");
+                        return ResponseEntity.status(500).body(Map.of("message", "Errore creazione pagamento"));
                     }
                 })
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    /** Il locale accetta pagamenti online? Il client mostra "Paga online" solo se enabled = true. */
+    @GetMapping("/config/{localname}")
+    public ResponseEntity<?> config(@PathVariable String localname) {
+        return userRepository.findByUsernameAndDeleted(localname, false)
+                .map(user -> ResponseEntity.ok(Map.of("enabled", paymentService.isOnlinePaymentEnabled(user.getIdAgency()))))
                 .orElse(ResponseEntity.notFound().build());
     }
 }
