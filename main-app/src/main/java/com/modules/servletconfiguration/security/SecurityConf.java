@@ -46,6 +46,9 @@ public class SecurityConf {
                         .requestMatchers("/api/public/**").permitAll()
                         // Webhook Stripe: nessun JWT, autenticato tramite firma Stripe-Signature (PaymentService)
                         .requestMatchers(HttpMethod.POST, "/api/payments/webhook").permitAll()
+                        // Stampanti: autenticate dal device token nel path
+                        .requestMatchers("/api/printers/cloudprnt/**").permitAll()
+                        .requestMatchers("/api/printers/bridge/**").permitAll()
                         .requestMatchers("/api/getAgencyName/**").permitAll()
                         .requestMatchers("/api/signupAgency").permitAll()
                         .requestMatchers("/api/signupWaiter").permitAll()

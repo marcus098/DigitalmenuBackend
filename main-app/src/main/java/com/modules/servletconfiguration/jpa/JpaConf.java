@@ -31,6 +31,7 @@ import javax.sql.DataSource;
         "com.modules.filemodule.model",
         "com.modules.mainapp.esl",
         "com.modules.mainapp.payment.entity",
+        "com.modules.takeawaymodule.model",
         "com.modules.mainapp.reservation.entity"
 })
 public class JpaConf {
@@ -64,6 +65,7 @@ public class JpaConf {
                 "com.modules.filemodule.model",
                 "com.modules.mainapp.esl",
                 "com.modules.mainapp.payment.entity",
+        "com.modules.takeawaymodule.model",
                 "com.modules.mainapp.reservation.entity"
         );
         factory.setJpaVendorAdapter(hibernateJpaVendorAdapter());

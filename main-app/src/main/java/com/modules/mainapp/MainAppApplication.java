@@ -14,6 +14,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 		"com.modules.categorymodule",
 		"com.modules.filemodule",
 		"com.modules.ordermodule",
+		"com.modules.takeawaymodule",
+		"com.modules.printmodule",
 		"com.modules.stylemodule",
 		"com.modules.tablemodule",
 		"com.modules.waitermodule",
@@ -34,6 +36,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 		"com.modules.productmodule.repository",
 		"com.modules.mainapp.reservation.repository",
 		"com.modules.mainapp.payment.repository",
+		"com.modules.takeawaymodule.repository",
 		"com.modules.mainapp.esl",
 })
 @EnableScheduling
