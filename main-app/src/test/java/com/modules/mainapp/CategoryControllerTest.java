@@ -172,11 +172,10 @@ public class CategoryControllerTest {
                 .with(request1 -> { request1.setMethod("POST"); return request1; }); // multipart defaults to GET
 
         Mockito.when(categoryService.updateCategory(Mockito.any(UpdateCategory.class), Mockito.isNull()))
-                .thenReturn(200);
+                .thenReturn(new CategoryDto());
 
         mockMvc.perform(request)
-                .andExpect(status().isOk())
-                .andExpect(content().string("Category updated successfully"));
+                .andExpect(status().isOk());
     }
 
     // Caso con file
@@ -194,11 +193,10 @@ public class CategoryControllerTest {
                 .with(req -> { req.setMethod("POST"); return req; });
 
         Mockito.when(categoryService.updateCategory(Mockito.any(UpdateCategory.class), Mockito.eq(file)))
-                .thenReturn(200);
+                .thenReturn(new CategoryDto());
 
         mockMvc.perform(request)
-                .andExpect(status().isOk())
-                .andExpect(content().string("Category updated successfully"));
+                .andExpect(status().isOk());
     }
 
     // Caso: update non valido (validate() == false)

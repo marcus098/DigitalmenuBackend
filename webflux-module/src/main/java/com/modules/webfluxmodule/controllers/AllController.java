@@ -1,6 +1,7 @@
 package com.modules.webfluxmodule.controllers;
 
 import com.modules.webfluxmodule.models.ListToExport;
+import com.modules.webfluxmodule.models.PublicComandDto;
 import com.modules.webfluxmodule.models.db.ComandReactive;
 import com.modules.webfluxmodule.models.db.Users;
 import com.modules.webfluxmodule.services.*;
@@ -22,7 +23,6 @@ import java.time.format.DateTimeParseException;
 import java.util.Map;
 import java.util.UUID;
 
-@CrossOrigin(origins = "*")
 @RequestMapping("/api")
 @RestController
 public class AllController {
@@ -45,6 +45,14 @@ public class AllController {
         this.userService = userService;
     }
 
+
+    private boolean isTokenValidFor(String token, Users user) {
+        try {
+            return jwtService.isTokenValid(token, user);
+        } catch (Exception e) {
+            return false;
+        }
+    }
 
     private Mono<Users> getAuthenticatedUser() {
         return ReactiveSecurityContextHolder.getContext()
@@ -109,20 +117,24 @@ public class AllController {
         return allService.getAll(Mono.empty(), -1L, localname, false);
     }
 
+    // Endpoint pubblici: restituiscono una vista REDATTA della comanda (niente nome/telefono/indirizzo/clientSessionId)
+
     @GetMapping("/public/orders/{comandId}")
-    public Mono<ComandReactive> getClientOrder(@PathVariable String comandId) {
+    public Mono<PublicComandDto> getClientOrder(@PathVariable String comandId) {
         return allService.getComandById(comandId)
+                .map(PublicComandDto::from)
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Comanda non trovata")));
     }
 
     @GetMapping("/public/orders/table/{tableId}")
-    public Flux<ComandReactive> getClientOrderHistory(
+    public Flux<PublicComandDto> getClientOrderHistory(
             @PathVariable long tableId,
             @RequestParam String localname
     ) {
         return agencyService.findByIdAgencyOrNameAndDeleted(null, localname)
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "Ristorante non trovato")))
-                .flatMapMany(agency -> allService.getComandsByTableSessionId(tableId, agency.getId()));
+                .flatMapMany(agency -> allService.getComandsByTableSessionId(tableId, agency.getId()))
+                .map(PublicComandDto::from);
     }
 
 
@@ -135,21 +147,28 @@ public class AllController {
      */
     @GetMapping(value = "/auth/admin", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<Map<String, Object>> streamAuthUpdates(@RequestParam(required = true) String token) {
-        if (jwtService.isExpired(token)) {
-            return Flux.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token scaduto"));
+        // Token in query string perché EventSource non può inviare header: NON loggare mai l'URL di questa
+        // richiesta (niente DEBUG su org.springframework.web / reactor.netty, niente access log con query).
+        long userId;
+        try {
+            if (jwtService.isExpired(token)) {
+                return Flux.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token scaduto"));
+            }
+            userId = jwtService.extractUserID(token);
+        } catch (Exception e) {
+            // firma non valida / malformato / scaduto (il parser lancia ExpiredJwtException)
+            return Flux.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token non valido"));
         }
-
-        long userId = jwtService.extractUserID(token);
-        Mono<Users> userMono = userService.loadUserById(userId);
+        Mono<Users> userMono = userService.loadUserById(userId)
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Utente non valido")));
 
         return userMono.flatMapMany(user -> {
-            if (user == null || user.isDeleted()) {
+            if (user == null || user.isDeleted() || !isTokenValidFor(token, user)) {
                 return Flux.error(new ResponseStatusException(HttpStatus.FORBIDDEN, "Utente non valido"));
             }
 
             Long agencyId = user.getId_agency();
             String sessionId = agencyId + "_" + UUID.randomUUID().toString();
-            System.out.println(sessionId);
             // Registra il client e ottiene il suo sink personale
             Sinks.Many<Map<String, Object>> userSink = sinkManager.register(agencyId, sessionId);
 

@@ -1,7 +1,9 @@
 package com.modules.servletconfiguration.security;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -14,6 +16,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.util.Arrays;
 import java.util.List;
 
 @Configuration
@@ -22,6 +25,10 @@ public class SecurityConf {
 
     private final JwtRequestFilter jwtRequestFilter;
     private final AuthenticationProvider authenticationProvider;
+
+    /** Origini ammesse per CORS, separate da virgola (env: APP_CORS_ALLOWED_ORIGINS). */
+    @Value("${app.cors.allowed-origins:http://localhost:5173,http://localhost:3000}")
+    private String allowedOrigins;
 
     public SecurityConf(JwtRequestFilter jwtRequestFilter, AuthenticationProvider authenticationProvider) {
         this.jwtRequestFilter = jwtRequestFilter;
@@ -37,6 +44,8 @@ public class SecurityConf {
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/login").permitAll()
                         .requestMatchers("/api/public/**").permitAll()
+                        // Webhook Stripe: nessun JWT, autenticato tramite firma Stripe-Signature (PaymentService)
+                        .requestMatchers(HttpMethod.POST, "/api/payments/webhook").permitAll()
                         .requestMatchers("/api/getAgencyName/**").permitAll()
                         .requestMatchers("/api/signupAgency").permitAll()
                         .requestMatchers("/api/signupWaiter").permitAll()
@@ -67,9 +76,17 @@ public class SecurityConf {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration corsConfiguration = new CorsConfiguration();
-        corsConfiguration.setAllowedOrigins(List.of("*"));
+        List<String> origins = Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(o -> !o.isEmpty())
+                .toList();
+        // allowedOriginPatterns permette anche wildcard esplicite tipo "https://*.example.com"
+        corsConfiguration.setAllowedOriginPatterns(origins);
         corsConfiguration.setAllowedHeaders(List.of("*"));
-        corsConfiguration.setAllowedMethods(List.of("GET", "POST", "DELETE", "OPTIONS"));
+        corsConfiguration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        // Il frontend usa header Authorization Bearer, non cookie: le credenziali non servono.
+        corsConfiguration.setAllowCredentials(false);
+        corsConfiguration.setMaxAge(3600L);
         UrlBasedCorsConfigurationSource urlBasedCorsConfigurationSource = new UrlBasedCorsConfigurationSource();
         urlBasedCorsConfigurationSource.registerCorsConfiguration("/**", corsConfiguration);
         return urlBasedCorsConfigurationSource;

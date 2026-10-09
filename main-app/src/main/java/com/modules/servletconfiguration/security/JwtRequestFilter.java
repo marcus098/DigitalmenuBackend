@@ -47,6 +47,8 @@ public class JwtRequestFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
+        // Solo la validazione del token sta nel try: le eccezioni dei controller/filtri a valle
+        // non devono essere trasformate in 401.
         try {
             String jwt = authenticationHeader.substring(7);
             String email = jwtService.extractEmail(jwt);
@@ -65,15 +67,15 @@ public class JwtRequestFilter extends OncePerRequestFilter {
 
                 }
             }
-
-            filterChain.doFilter(request, response);
-
         } catch (Exception e) {
-            System.out.println("ERRORE");
-            ErrorLog.logger.error("errore", e);
+            // Token malformato/scaduto/firma non valida: 401 senza stack trace verso il client.
+            ErrorLog.logger.warn("JWT non valido su {} {}: {}", request.getMethod(), request.getRequestURI(), e.getClass().getSimpleName());
+            SecurityContextHolder.clearContext();
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            handlerExceptionResolver.resolveException(request, response, null, e);
+            return;
         }
+
+        filterChain.doFilter(request, response);
     }
 
     // Metodo per estrarre il corpo della richiesta

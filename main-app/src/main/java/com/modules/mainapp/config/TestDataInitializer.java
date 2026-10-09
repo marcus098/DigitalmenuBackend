@@ -13,13 +13,19 @@ import com.modules.common.model.enums.Role;
 import com.modules.stylemodule.repository.StyleRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.context.annotation.Profile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Seed di dati di test (locale + utente admin + categorie).
+ * Attivo SOLO con il profilo "dev" (es. SPRING_PROFILES_ACTIVE=dev): mai in produzione.
+ */
 @Component
+@Profile("dev")
 public class TestDataInitializer implements CommandLineRunner {
 
     private static final String TEST_LOCALNAME = "ristorantetest";
@@ -68,8 +74,8 @@ public class TestDataInitializer implements CommandLineRunner {
                     if (styleRepository.findByIdAgencyAndDeleted(agency.getId(), false).isEmpty()) {
                         styleUtils.saveNewStyle(new StyleDto(), agency.getId(), created.getId());
                     }
-                    ErrorLog.logger.info("[TestData] Creato utente '{}' (password: {}) per locale '{}'",
-                            TEST_EMAIL, TEST_PASSWORD, TEST_LOCALNAME);
+                    ErrorLog.logger.info("[TestData] Creato utente '{}' per locale '{}'",
+                            TEST_EMAIL, TEST_LOCALNAME);
                     return created;
                 });
 

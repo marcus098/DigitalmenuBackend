@@ -17,8 +17,10 @@ import com.modules.servletconfiguration.security.AuthenticatedUserProvider;
 import jakarta.transaction.Transactional;
 import com.modules.common.finders.FileUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 import org.thymeleaf.context.Context;
 
 import java.time.OffsetDateTime;
@@ -83,7 +85,10 @@ public class CardService {
 
     @Transactional
     public CardDto getCardInfo(String code){
-        return new CardDto(cardRepository.findByCodeAndDeleted(code, false).orElseThrow());
+        // Scoped all'agency del chiamante: una card di un altro locale risulta inesistente.
+        long idAgency = authUserProvider.getAgencyId();
+        return new CardDto(cardRepository.findByCodeAndDeletedAndIdAgency(code, false, idAgency)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Card non trovata")));
     }
 
     @Transactional

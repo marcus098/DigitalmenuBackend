@@ -3,6 +3,7 @@ package com.modules.webfluxmodule.configurations;
 import com.modules.webfluxmodule.services.JwtService;
 import com.modules.webfluxmodule.services.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.ReactiveAuthenticationManager;
@@ -16,6 +17,9 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.reactive.CorsConfigurationSource;
 import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
 
+import java.util.Arrays;
+import java.util.List;
+
 @Configuration
 @EnableWebFluxSecurity
 public class ReactiveSecurityConf {
@@ -23,6 +27,10 @@ public class ReactiveSecurityConf {
     private final JwtService jwtService;
     private final UserService userService;
     private final ReactiveAuthenticationManager reactiveAuthenticationManager;
+
+    /** Origini CORS ammesse, separate da virgola (env: APP_CORS_ALLOWED_ORIGINS). */
+    @Value("${app.cors.allowed-origins:http://localhost:5173,http://localhost:3000}")
+    private String allowedOrigins;
 
     @Autowired
     public ReactiveSecurityConf(JwtService jwtService, ReactiveAuthenticationManager reactiveAuthenticationManager, UserService userService) {
@@ -34,9 +42,13 @@ public class ReactiveSecurityConf {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration corsConfiguration = new CorsConfiguration();
-        corsConfiguration.addAllowedOrigin("*");
+        corsConfiguration.setAllowedOriginPatterns(Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(o -> !o.isEmpty())
+                .toList());
         corsConfiguration.addAllowedHeader("*");
-        corsConfiguration.addAllowedMethod("*");
+        corsConfiguration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        corsConfiguration.setAllowCredentials(false);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", corsConfiguration);
         return source;

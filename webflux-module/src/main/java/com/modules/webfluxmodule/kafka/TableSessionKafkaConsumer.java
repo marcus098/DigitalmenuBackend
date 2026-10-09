@@ -21,7 +21,7 @@ public class TableSessionKafkaConsumer {
         this.sinkManager = sinkManager;
     }
 
-    @KafkaListener(topics = "table-session-updated", groupId = "table-session-sse-group",
+    @KafkaListener(topics = "table-session-updated", groupId = "${app.kafka.table-session-group-id:table-session-sse-group}",
             containerFactory = "kafkaListenerContainerFactory")
     public void listen(List<String> messages) {
         for (String json : messages) {

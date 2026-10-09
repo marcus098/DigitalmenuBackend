@@ -4,6 +4,7 @@ import com.google.zxing.BarcodeFormat;
 import com.google.zxing.client.j2se.MatrixToImageWriter;
 import com.google.zxing.common.BitMatrix;
 import com.google.zxing.qrcode.QRCodeWriter;
+import com.modules.common.finders.TableUtils;
 import com.modules.common.logs.errorlog.ErrorLog;
 import com.modules.servletconfiguration.security.AuthenticatedUserProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,13 +12,16 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.ByteArrayOutputStream;
 import java.util.List;
@@ -37,6 +41,12 @@ public class EslService {
 
     @Autowired
     private AuthenticatedUserProvider authUserProvider;
+
+    @Autowired
+    private TableUtils tableUtils;
+
+    @Autowired
+    private EslApUrlValidator apUrlValidator;
 
     /**
      * Called when a table is marked OCCUPIED. Generates the QR code PNG and
@@ -63,6 +73,7 @@ public class EslService {
                 return;
             }
 
+            apUrlValidator.validate(apUrl); // ri-validazione a ogni push (DNS rebinding)
             postToAp(apUrl, config.getEslTagMac(), qrPng);
             ErrorLog.logger.info("ESL: QR aggiornato per tavolo {} → tag {}", tableId, config.getEslTagMac());
         } catch (Exception e) {
@@ -72,6 +83,12 @@ public class EslService {
 
     public EslConfigJpa saveConfig(Long tableId, String eslTagMac, String eslApUrl) {
         long idAgency = authUserProvider.getAgencyId();
+        requireOwnTable(tableId, idAgency);
+        try {
+            apUrlValidator.validate(eslApUrl);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
         EslConfigJpa config = eslConfigRepository.findByTableId(tableId).orElse(new EslConfigJpa());
         config.setTableId(tableId);
         config.setIdAgency(idAgency);
@@ -85,12 +102,15 @@ public class EslService {
         return eslConfigRepository.findByIdAgency(idAgency);
     }
 
+    @Transactional
     public void deleteConfig(Long tableId) {
+        requireOwnTable(tableId, authUserProvider.getAgencyId());
         eslConfigRepository.deleteByTableId(tableId);
     }
 
     /** Manually trigger a QR push from the dashboard (e.g. after configuring a new tag). */
     public boolean manualPush(Long tableId) {
+        requireOwnTable(tableId, authUserProvider.getAgencyId());
         try {
             updateTableTag(tableId);
             return true;
@@ -100,6 +120,13 @@ public class EslService {
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    /** IDOR guard: il tavolo deve appartenere all'agency del chiamante, altrimenti 404. */
+    private void requireOwnTable(Long tableId, long idAgency) {
+        if (tableId == null || tableUtils.findByIdAndIdAgencyAndDeleted(tableId, idAgency).isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tavolo non trovato");
+        }
+    }
 
     private byte[] generateQrPng(String content, int size) throws Exception {
         QRCodeWriter writer = new QRCodeWriter();

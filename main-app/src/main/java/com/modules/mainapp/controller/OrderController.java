@@ -7,7 +7,6 @@ import com.modules.ordermodule.request.ChangeStatus;
 import com.modules.ordermodule.service.OrderComandService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -20,15 +19,6 @@ import java.util.concurrent.CompletableFuture;
 public class OrderController {
     @Autowired
     private OrderComandService orderComandService;
-
-    @ControllerAdvice
-    public class GlobalExceptionHandler {
-
-        @ExceptionHandler(HttpMessageNotReadableException.class)
-        public ResponseEntity<?> handleDeserializationException(HttpMessageNotReadableException ex) {
-            return ResponseEntity.badRequest().body("Errore nel parsing del JSON: " + ex.getMessage());
-        }
-    }
 
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
     @PostMapping("/insertWaiter")
