@@ -36,9 +36,7 @@ Repo, entrambi clonati nella home dell'utente di deploy, **affiancati** (il comp
 ~/DigitalmenuBackend    ← Dockerfile, Dockerfile.webflux, deploy/config/*.example, docs/
 ```
 
-Branch da deployare (finché non vengono mergiati su `master`):
-- backend: `fix/audit-and-printer`
-- frontend: `fix/audit`
+Branch da deployare: `master` in entrambi i repo.
 
 ---
 
@@ -74,8 +72,8 @@ cd ~
 [ -d DigitalmenuBackend ]  || git clone https://github.com/marcus098/DigitalmenuBackend.git
 [ -d DigitalmenuFrontend ] || git clone https://github.com/marcus098/DigitalmenuFrontend.git
 
-cd ~/DigitalmenuBackend  && git fetch origin && git checkout fix/audit-and-printer && git pull --ff-only
-cd ~/DigitalmenuFrontend && git fetch origin && git checkout fix/audit           && git pull --ff-only
+cd ~/DigitalmenuBackend  && git fetch origin && git checkout master && git pull --ff-only
+cd ~/DigitalmenuFrontend && git fetch origin && git checkout master && git pull --ff-only
 git -C ~/DigitalmenuBackend log -1 --oneline; git -C ~/DigitalmenuFrontend log -1 --oneline
 ```
 
