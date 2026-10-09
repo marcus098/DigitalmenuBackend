@@ -16,8 +16,36 @@ public abstract class Comand {
     private Long idAgency;
     private String tableSessionId;
     private String clientSessionId;
+    /** Pagamento online confermato da Stripe (null/false = non pagata online). */
+    private Boolean paid;
+    private LocalDateTime paidAt;
+    private String paymentIntentId;
 
     public Comand() {}
+
+    public Boolean getPaid() {
+        return paid;
+    }
+
+    public void setPaid(Boolean paid) {
+        this.paid = paid;
+    }
+
+    public LocalDateTime getPaidAt() {
+        return paidAt;
+    }
+
+    public void setPaidAt(LocalDateTime paidAt) {
+        this.paidAt = paidAt;
+    }
+
+    public String getPaymentIntentId() {
+        return paymentIntentId;
+    }
+
+    public void setPaymentIntentId(String paymentIntentId) {
+        this.paymentIntentId = paymentIntentId;
+    }
 
     public String getClientSessionId() {
         return clientSessionId;

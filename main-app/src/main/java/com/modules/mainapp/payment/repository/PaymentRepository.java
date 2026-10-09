@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -18,6 +19,16 @@ public interface PaymentRepository extends JpaRepository<PaymentJpa, Long> {
     List<PaymentJpa> findByIdAgencyAndCreatedAtBetweenAndStatus(long idAgency, LocalDateTime from, LocalDateTime to, String status);
     boolean existsByComandIdAndStatus(String comandId, String status);
     Optional<PaymentJpa> findFirstByComandIdAndStatusOrderByCreatedAtDesc(String comandId, String status);
+    List<PaymentJpa> findByComandIdAndStatusInOrderByCreatedAtDesc(String comandId, Collection<String> statuses);
+    Optional<PaymentJpa> findByIdAndIdAgency(long id, long idAgency);
+    long countByComandId(String comandId);
+
+    /** Transizione condizionale: aggiorna solo se lo stato attuale è tra quelli ammessi (0 = già transitato). */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE PaymentJpa p SET p.status = :status, p.updatedAt = :now " +
+            "WHERE p.stripePaymentIntentId = :intentId AND p.status IN :from")
+    int updateStatusIfIn(@Param("intentId") String intentId, @Param("from") Collection<String> from,
+                         @Param("status") String status, @Param("now") LocalDateTime now);
 
     /** Transizione atomica (idempotenza webhook): ritorna 0 se il pagamento era già nello stato richiesto. */
     @Modifying(clearAutomatically = true, flushAutomatically = true)

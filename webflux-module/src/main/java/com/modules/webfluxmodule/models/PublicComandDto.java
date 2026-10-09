@@ -22,7 +22,9 @@ public record PublicComandDto(
         LocalDateTime updatedAt,
         Long idTable,
         List<Order> orders,
-        long totalCents
+        long totalCents,
+        /** true se la comanda è stata pagata online (Stripe). */
+        boolean paid
 ) {
 
     public static PublicComandDto from(ComandReactive c) {
@@ -33,14 +35,22 @@ public record PublicComandDto(
                 .toList();
         Long idTable = c.getIdTable() != null && c.getIdTable() > 0 ? c.getIdTable() : null;
         return new PublicComandDto(c.getId(), c.getType(), c.getStatus(), c.getCreatedAt(), c.getUpdatedAt(),
-                idTable, orders, totalCents(orders));
+                idTable, orders, totalCents(orders), Boolean.TRUE.equals(c.getPaid()));
     }
 
-    /** Totale indicativo dai prezzi salvati nella comanda (stessa formula del frontend). */
+    /**
+     * Totale dai prezzi salvati nella comanda: usa lo snapshot server-side (unitPriceCents) quando presente,
+     * come il calcolo usato per il pagamento; per comande vecchie ricade su opzione + extra.
+     */
     private static long totalCents(List<Order> orders) {
         long total = 0;
         for (Order o : orders) {
             for (ProductToOrder p : o.getProducts()) {
+                if (p == null) continue;
+                if (p.getUnitPriceCents() != null) {
+                    total += p.getUnitPriceCents() * Math.max(0, p.getQuantity());
+                    continue;
+                }
                 long unit = p.getProductOption() != null ? Math.round(p.getProductOption().getPrice() * 100d) : 0L;
                 if (p.getIngredientsPlus() != null) {
                     unit += p.getIngredientsPlus().stream().mapToLong(i -> Math.round(i.getPrice() * 100d)).sum();

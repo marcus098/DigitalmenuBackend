@@ -8,5 +8,6 @@ import java.util.Optional;
 public interface AgencyRepository extends JpaRepository<AgencyJpa, Long> {
     Optional<AgencyJpa> findByIdAndDeleted(Long id, Boolean deleted);
     Optional<AgencyJpa> findByNameAndDeleted(String name, boolean deleted);
+    Optional<AgencyJpa> findByStripeAccountId(String stripeAccountId);
     boolean existsByNameAndDeleted(String name, boolean deleted);
 }

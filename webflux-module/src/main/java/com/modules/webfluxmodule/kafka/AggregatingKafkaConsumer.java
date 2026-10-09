@@ -75,11 +75,13 @@ public class AggregatingKafkaConsumer {
             Map<String, Object> event = parseOrderEvent(json);
             if (event == null || !(event.get("idAgency") instanceof Number)) continue;
             Long agencyId = ((Number) event.get("idAgency")).longValue();
-            // Lo stream SSE è condiviso con i client pubblici: inoltra SOLO {id, status, idAgency}
+            // Lo stream SSE è condiviso con i client pubblici: inoltra SOLO {id, status, idAgency, paid}
             Map<String, Object> projected = new HashMap<>();
             projected.put("id", event.get("id"));
             projected.put("status", event.get("status"));
             projected.put("idAgency", agencyId);
+            // flag di pagamento online (non sensibile): permette alle dashboard di aggiornare badge/cassa
+            if (event.get("paid") instanceof Boolean paid) projected.put("paid", paid);
             event = projected;
             ordersByAgency.computeIfAbsent(agencyId, k -> new ArrayList<>()).add(event);
         }

@@ -49,6 +49,7 @@ public class SecurityConf {
                         // Stampanti: autenticate dal device token nel path
                         .requestMatchers("/api/printers/cloudprnt/**").permitAll()
                         .requestMatchers("/api/printers/bridge/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/payments/webhook/connect").permitAll()
                         .requestMatchers("/api/getAgencyName/**").permitAll()
                         .requestMatchers("/api/signupAgency").permitAll()
                         .requestMatchers("/api/signupWaiter").permitAll()
