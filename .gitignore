@@ -63,3 +63,7 @@ _ReSharper*/
 .vs/
 #Nuget packages folder
 packages/
+
+### Local config with secrets (never commit) ###
+**/src/main/resources/application.properties
+**/src/main/resources/application-local.properties
