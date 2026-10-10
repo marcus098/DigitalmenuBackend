@@ -6,8 +6,11 @@ WORKDIR /app
 COPY common/pom.xml common/
 COPY webflux-module/pom.xml webflux-module/
 
-RUN mvn dependency:go-offline -B -q -f common/pom.xml || true && \
-    mvn dependency:go-offline -B -q -f webflux-module/pom.xml || true
+# go-offline solo per common. Per webflux lo saltiamo: dipende da common ma
+# common non e ancora installato nel .m2 a questo punto, lo step produrebbe
+# un [ERROR] cosmetico (vedi Jenkins log-parser false positive). Lo step 8
+# (mvn install common && mvn package webflux) scarica cmq le deps mancanti.
+RUN mvn dependency:go-offline -B -q -f common/pom.xml 2>/dev/null || true
 
 COPY common/src common/src/
 COPY webflux-module/src webflux-module/src/
