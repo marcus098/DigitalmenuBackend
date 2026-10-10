@@ -22,6 +22,17 @@ public class UpdateStyle {
     private String whatsapp;
     private String tiktokUrl;
     private String landingTemplate;
+    private String heroBgColor;
+    private Double heroOverlayOpacity;
+    private String secondaryColor;
+    private String secondaryTextColor;
+    private String features;
+    private String sectionMenuTitle;
+    private String sectionBookingTitle;
+    private String sectionWhyTitle;
+    private Boolean showWhyUs;
+    private Boolean showBooking;
+    private Boolean showTicker;
 
     public UpdateStyle() {
 
@@ -169,4 +180,37 @@ public class UpdateStyle {
 
     public String getLandingTemplate() { return landingTemplate; }
     public void setLandingTemplate(String landingTemplate) { this.landingTemplate = landingTemplate; }
+
+    public String getHeroBgColor() { return heroBgColor; }
+    public void setHeroBgColor(String heroBgColor) { this.heroBgColor = heroBgColor; }
+
+    public Double getHeroOverlayOpacity() { return heroOverlayOpacity; }
+    public void setHeroOverlayOpacity(Double heroOverlayOpacity) { this.heroOverlayOpacity = heroOverlayOpacity; }
+
+    public String getSecondaryColor() { return secondaryColor; }
+    public void setSecondaryColor(String secondaryColor) { this.secondaryColor = secondaryColor; }
+
+    public String getSecondaryTextColor() { return secondaryTextColor; }
+    public void setSecondaryTextColor(String secondaryTextColor) { this.secondaryTextColor = secondaryTextColor; }
+
+    public String getFeatures() { return features; }
+    public void setFeatures(String features) { this.features = features; }
+
+    public String getSectionMenuTitle() { return sectionMenuTitle; }
+    public void setSectionMenuTitle(String sectionMenuTitle) { this.sectionMenuTitle = sectionMenuTitle; }
+
+    public String getSectionBookingTitle() { return sectionBookingTitle; }
+    public void setSectionBookingTitle(String sectionBookingTitle) { this.sectionBookingTitle = sectionBookingTitle; }
+
+    public String getSectionWhyTitle() { return sectionWhyTitle; }
+    public void setSectionWhyTitle(String sectionWhyTitle) { this.sectionWhyTitle = sectionWhyTitle; }
+
+    public Boolean getShowWhyUs() { return showWhyUs; }
+    public void setShowWhyUs(Boolean showWhyUs) { this.showWhyUs = showWhyUs; }
+
+    public Boolean getShowBooking() { return showBooking; }
+    public void setShowBooking(Boolean showBooking) { this.showBooking = showBooking; }
+
+    public Boolean getShowTicker() { return showTicker; }
+    public void setShowTicker(Boolean showTicker) { this.showTicker = showTicker; }
 }

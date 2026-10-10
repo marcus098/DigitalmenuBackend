@@ -77,6 +77,50 @@ public class StyleJpa extends Style {
     public String getLandingTemplate() { return super.getLandingTemplate(); }
 
     @Override
+    @Column(name = "hero_bg_color")
+    public String getHeroBgColor() { return super.getHeroBgColor(); }
+
+    @Override
+    @Column(name = "hero_overlay_opacity")
+    public Double getHeroOverlayOpacity() { return super.getHeroOverlayOpacity(); }
+
+    @Override
+    @Column(name = "secondary_color")
+    public String getSecondaryColor() { return super.getSecondaryColor(); }
+
+    @Override
+    @Column(name = "secondary_text_color")
+    public String getSecondaryTextColor() { return super.getSecondaryTextColor(); }
+
+    @Override
+    @Column(name = "features", columnDefinition = "TEXT")
+    public String getFeatures() { return super.getFeatures(); }
+
+    @Override
+    @Column(name = "section_menu_title")
+    public String getSectionMenuTitle() { return super.getSectionMenuTitle(); }
+
+    @Override
+    @Column(name = "section_booking_title")
+    public String getSectionBookingTitle() { return super.getSectionBookingTitle(); }
+
+    @Override
+    @Column(name = "section_why_title")
+    public String getSectionWhyTitle() { return super.getSectionWhyTitle(); }
+
+    @Override
+    @Column(name = "show_why_us")
+    public Boolean getShowWhyUs() { return super.getShowWhyUs(); }
+
+    @Override
+    @Column(name = "show_booking")
+    public Boolean getShowBooking() { return super.getShowBooking(); }
+
+    @Override
+    @Column(name = "show_ticker")
+    public Boolean getShowTicker() { return super.getShowTicker(); }
+
+    @Override
     public String getAddress() {
         return super.getAddress();
     }

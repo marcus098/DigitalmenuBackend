@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="it" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Nuova richiesta di contatto</title>
+</head>
+<!-- Tutti i campi utente sono resi con th:text (escape HTML). Non usare th:utext qui. -->
+<body style="font-family: Arial, sans-serif; color: #1f1a14; background-color: #f4efe6; padding: 20px; margin: 0;">
+<div style="max-width: 620px; margin: 0 auto; background-color: #ffffff; padding: 28px; border: 1px solid #e2d9c8;">
+    <h2 style="margin: 0 0 4px; font-size: 20px;">Nuova richiesta dal sito</h2>
+    <p style="margin: 0 0 20px; color: #6b6255; font-size: 13px;" th:text="'Ricevuta il ' + ${receivedAt}">Ricevuta il</p>
+
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr><td style="padding: 6px 0; color: #6b6255; width: 140px;">Nome</td><td style="padding: 6px 0;" th:text="${name}">Nome</td></tr>
+        <tr><td style="padding: 6px 0; color: #6b6255;">Locale</td><td style="padding: 6px 0;" th:text="${venueName}">Locale</td></tr>
+        <tr><td style="padding: 6px 0; color: #6b6255;">Tipo di locale</td><td style="padding: 6px 0;" th:text="${venueType}">Tipo</td></tr>
+        <tr><td style="padding: 6px 0; color: #6b6255;">Email</td><td style="padding: 6px 0;" th:text="${email}">Email</td></tr>
+        <tr><td style="padding: 6px 0; color: #6b6255;">Telefono</td><td style="padding: 6px 0;" th:text="${phone}">Telefono</td></tr>
+    </table>
+
+    <h3 style="margin: 24px 0 8px; font-size: 15px;">Messaggio</h3>
+    <div style="white-space: pre-wrap; font-size: 14px; line-height: 1.55; border-left: 3px solid #b5432a; padding: 4px 0 4px 14px;"
+         th:text="${message}">Messaggio</div>
+
+    <p style="margin-top: 28px; color: #8a8072; font-size: 12px;">
+        Rispondi a questa email per scrivere direttamente al mittente (Reply-To).
+        Consenso informativa privacy: accettato. IP: <span th:text="${remoteAddr}">-</span>
+    </p>
+</div>
+</body>
+</html>

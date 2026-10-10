@@ -1,0 +1,6 @@
+{
+  "serverUrl": "https://api.tuodominio.it",
+  "deviceToken": "INCOLLA-QUI-IL-TOKEN-DELLA-DASHBOARD",
+  "printer": { "type": "serial", "path": "COM5" },
+  "pollIntervalMs": 2500
+}

@@ -218,6 +218,21 @@ Solo la **prima volta**:
 Il bootstrap non sovrascrive mai la password di un utente esistente: rimettere la variabile non la cambia.
 Il nome locale `superadmin` è riservato (collide con la rotta `/superadmin` del frontend).
 
+## 8ter. Modulo "Contattaci" del sito vetrina
+
+La home `/` del frontend è il sito vetrina; il suo modulo invia a `POST /api/public/contact` (max 5 invii/ora per
+IP, honeypot anti-bot) che inoltra la richiesta via email (SMTP già configurato in `config/main-app`).
+Il destinatario è `APP_CONTACT_TO` in `.env` (passata dal compose come `app.contact.to`):
+
+```bash
+cd ~/DigitalmenuFrontend
+grep -q '^APP_CONTACT_TO=' .env || echo 'APP_CONTACT_TO=' >> .env
+# 🧑 l'utente inserisce l'indirizzo, es. APP_CONTACT_TO=commerciale@DOMINIO
+docker compose up -d backend
+```
+
+Se resta vuota il modulo risponde 503 ("non disponibile") e nei log compare `CONTACT: app.contact.to non configurato`.
+
 ## 9. Verifica
 
 ```bash

@@ -80,6 +80,10 @@ app.secrets.encryption-key=REPLACE_ME
 app.superadmin.email=
 app.superadmin.password=
 
+# Modulo "Contattaci" del sito vetrina (POST /api/public/contact): indirizzo che riceve le richieste.
+# Vuoto = modulo disattivato (l'endpoint risponde 503). Sovrascritta dal compose (APP_CONTACT_TO).
+app.contact.to=
+
 twilio.enabled=false
 twilio.account-sid=
 twilio.auth-token=

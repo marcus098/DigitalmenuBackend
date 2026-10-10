@@ -1,6 +1,7 @@
 package com.modules.mainapp.controller;
 
 import com.modules.cardmodule.requests.AddCard;
+import com.modules.cardmodule.requests.LoyaltySettingsDto;
 import com.modules.cardmodule.service.CardService;
 import com.modules.common.logs.errorlog.ErrorLog;
 import com.modules.common.responses.DataResponse;
@@ -10,12 +11,29 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
+
 @Controller
 @CrossOrigin
 @RequestMapping("/api/cards")
 public class CardController {
     @Autowired
     private CardService cardService;
+
+    /** Regole tessere del locale (€ per punto, valore punto, timbri per premio): servono anche alla cassa. */
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
+    @GetMapping("/settings")
+    public ResponseEntity<?> getSettings() {
+        return ResponseEntity.ok(new DataResponse<>(cardService.getSettings()));
+    }
+
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
+    @PutMapping("/settings")
+    public ResponseEntity<?> updateSettings(@RequestBody LoyaltySettingsDto settings) {
+        String error = settings.validate();
+        if (error != null) return ResponseEntity.badRequest().body(Map.of("message", error));
+        return ResponseEntity.ok(new DataResponse<>(cardService.updateSettings(settings)));
+    }
 
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
     @GetMapping("/info/{code}")

@@ -32,8 +32,13 @@ public abstract class Comand {
     private Boolean authorizationCanceled;
     /** Pagamento rimborsato integralmente. */
     private Boolean refunded;
+    /** Chiusura del conto in cassa (null = non ancora chiuso in cassa). */
+    private ComandCheckout checkout;
 
     public Comand() {}
+
+    public ComandCheckout getCheckout() { return checkout; }
+    public void setCheckout(ComandCheckout checkout) { this.checkout = checkout; }
 
     public Boolean getApprovalRequired() { return approvalRequired; }
     public void setApprovalRequired(Boolean approvalRequired) { this.approvalRequired = approvalRequired; }

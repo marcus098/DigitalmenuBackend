@@ -40,6 +40,30 @@ public class EmailService {
         }
     }
 
+    /**
+     * Come {@link #sendEmail(String, String, String, Context)} ma con Reply-To (es. modulo contatti: rispondendo
+     * si scrive direttamente a chi ha compilato il form). replyTo null/vuoto = nessun Reply-To.
+     */
+    public boolean sendEmailWithReplyTo(String to, String replyTo, String subject, String templateName, Context context) {
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+            helper.setFrom(new InternetAddress("marcoassenza98@gmail.com"));
+            helper.setTo(to);
+            if (replyTo != null && !replyTo.isBlank()) {
+                helper.setReplyTo(new InternetAddress(replyTo, true));
+            }
+            helper.setSubject(subject);
+            helper.setText(getHtmlContent(templateName, context), true);
+
+            mailSender.send(message);
+            return true;
+        } catch (Exception e) {
+            ErrorLog.logger.error("Errore invio email, ", e);
+            return false;
+        }
+    }
+
     private String getHtmlContent(String templateName, Context context) {
         return templateEngine.process(templateName, context);
     }
