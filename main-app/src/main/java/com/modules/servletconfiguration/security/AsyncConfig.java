@@ -15,7 +15,7 @@ import java.util.concurrent.Executor;
  * e propaga il SecurityContext ai thread che esegue.
  */
 @Configuration
-@EnableAsync
+@EnableAsync(proxyTargetClass = true)
 public class AsyncConfig implements AsyncConfigurer {
 
     @Bean("taskExecutor")
