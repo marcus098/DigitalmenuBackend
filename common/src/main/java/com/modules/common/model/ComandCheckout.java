@@ -24,6 +24,8 @@ public class ComandCheckout {
     private boolean stampRedeemed;
     /** true se i movimenti sulla tessera non sono andati a buon fine (da verificare a mano). */
     private boolean loyaltyError;
+    /** Perché la visita/i punti non sono stati accreditati (es. "Visita già conteggiata oggi"). */
+    private String loyaltyNote;
     /** Comanda già pagata online: l'incasso è già contato nei pagamenti, qui non va sommato di nuovo. */
     private boolean paidOnline;
     private LocalDateTime closedAt;
@@ -53,6 +55,8 @@ public class ComandCheckout {
     public void setStampRedeemed(boolean stampRedeemed) { this.stampRedeemed = stampRedeemed; }
     public boolean isLoyaltyError() { return loyaltyError; }
     public void setLoyaltyError(boolean loyaltyError) { this.loyaltyError = loyaltyError; }
+    public String getLoyaltyNote() { return loyaltyNote; }
+    public void setLoyaltyNote(String loyaltyNote) { this.loyaltyNote = loyaltyNote; }
     public boolean isPaidOnline() { return paidOnline; }
     public void setPaidOnline(boolean paidOnline) { this.paidOnline = paidOnline; }
     public LocalDateTime getClosedAt() { return closedAt; }

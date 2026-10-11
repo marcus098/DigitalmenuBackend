@@ -84,6 +84,17 @@ app.superadmin.password=
 # Vuoto = modulo disattivato (l'endpoint risponde 503). Sovrascritta dal compose (APP_CONTACT_TO).
 app.contact.to=
 
+# Traduzione del menu in più lingue con Ollama (modello locale, nessun dato inviato a terzi).
+# false = la sezione "Lingue del menu" mostra le lingue ma non traduce (le correzioni a mano funzionano comunque).
+app.ai.enabled=false
+app.ai.ollama.base-url=http://localhost:11434
+# Basic auth opzionale se Ollama è dietro un reverse proxy
+app.ai.ollama.username=
+app.ai.ollama.password=
+app.ai.model.translate=qwen2.5:7b
+app.ai.timeout-seconds=120
+app.ai.num-ctx=8192
+
 twilio.enabled=false
 twilio.account-sid=
 twilio.auth-token=

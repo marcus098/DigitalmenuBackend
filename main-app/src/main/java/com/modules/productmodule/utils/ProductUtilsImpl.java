@@ -84,7 +84,8 @@ public class ProductUtilsImpl implements ProductUtils {
     private List<ProductJpa> returnToJpa(List<ProductDto> prods, long idAgency){
         return prods
                 .stream()
-                .map(p -> new ProductJpa(
+                .map(p -> {
+                    ProductJpa product = new ProductJpa(
                         p.getId(),
                         p.getName(),
                         p.getDescription(),
@@ -97,7 +98,11 @@ public class ProductUtilsImpl implements ProductUtils {
                         utilities.convertLongListToString(p.getIngredients()),
                         p.isAvailable(),
                         p.getPosition_progressive()
-                ))
+                    );
+                    // Le tracce non sono nel costruttore: senza questo il salvataggio le azzererebbe
+                    product.setTraces(utilities.convertIntListToString(p.getTraces()));
+                    return product;
+                })
                 .collect(Collectors.toList());
     }
 }

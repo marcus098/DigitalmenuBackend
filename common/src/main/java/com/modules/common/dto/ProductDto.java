@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonView;
 import com.modules.common.model.OptionInProduct;
 import com.modules.common.model.db.Product;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class ProductDto {
@@ -14,7 +15,11 @@ public class ProductDto {
     private String image;
     private Long idCategory;
     private List<Integer> tags;
+    // Allergeni dichiarati direttamente sul prodotto (id 1..14). Gli allergeni effettivi
+    // sono l'unione con quelli dei suoi ingredienti, calcolata dal client.
     private List<Integer> allergens;
+    // "Può contenere tracce di" (id 1..14)
+    private List<Integer> traces = new ArrayList<>();
     private List<Long> ingredients;
     private boolean available;
     private int position_progressive;
@@ -117,6 +122,14 @@ public class ProductDto {
         return idCategory;
     }
 
+    public List<Integer> getTraces() {
+        return traces;
+    }
+
+    public void setTraces(List<Integer> traces) {
+        this.traces = traces;
+    }
+
     public String getDescription() {
         return description;
     }
@@ -200,6 +213,7 @@ public class ProductDto {
                 ", idCategory=" + idCategory +
                 ", tags=" + tags +
                 ", allergens=" + allergens +
+                ", traces=" + traces +
                 ", ingredients=" + ingredients +
                 ", available=" + available +
                 ", position_progressive=" + position_progressive +

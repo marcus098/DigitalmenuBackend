@@ -88,39 +88,16 @@ public class IngredientService {
             IngredientJpa ingredient = optionalIngredient.get();
             IngredientDto ingredientDto = ingredientMapper.toDto(ingredient);
             /*
-                Devo controllare se gli allergeni sono stati modificati oppure no. Se si, devo modificare in cascata tutti i prodotti con questo ingrediente
+                Gli allergeni degli ingredienti non sono più copiati sui prodotti (il prodotto salva solo
+                quelli dichiarati direttamente; gli effettivi li calcola il client come unione con gli
+                ingredienti), quindi non serve più aggiornare i prodotti in cascata.
              */
-
             List<Integer> oldAllergensList = utilities.convertStringToIntList(ingredient.getAllergens());
             List<Integer> newAllergensList = updateIngredient.getAllergens();
 
             boolean areEquals = (new HashSet<>(oldAllergensList)).equals(new HashSet<>(newAllergensList));
 
             List<EntityLog<ProductDto>> productLogs = new ArrayList<>();
-
-            if(!areEquals){
-                List<ProductDto> products = productUtils.findAllByIngredientIdAndDeleted(ingredient.getId(), idAgency);
-                for (ProductDto product : products) {
-                    /* Devo rimuovere i vecchi allergeni al prodotto e aggiungere quelli nuovi */
-                    List<Integer> allergensInProduct = product.getAllergens();
-
-                    // Rimuove ogni elemento di `olds` una sola volta da `allergensInProduct`
-                    for (Integer oldAllergen : oldAllergensList) {
-                        allergensInProduct.remove(oldAllergen);
-                    }
-
-                    // Aggiunge i nuovi allergeni
-                    allergensInProduct.addAll(newAllergensList);
-                    ProductDto old = product;
-
-                    // Converte nuovamente in stringa e aggiorna il campo `allergens` del prodotto
-                    product.setAllergens(allergensInProduct);
-
-                    productLogs.add(new EntityLog<>(LogOperation.UPDATE, old, product, "from updateIngredient function", idUser, idAgency));
-                }
-                if(!products.isEmpty())
-                    productUtils.saveAll(products, idAgency);
-            }
 
             ingredient.setAddable(updateIngredient.isAddable());
             ingredient.setAvailable(updateIngredient.isAvailable());
@@ -164,14 +141,7 @@ public class IngredientService {
             List<ProductDto> products = productUtils.findAllByIngredientIdAndDeleted(id, idAgency);
             List<EntityLog<ProductDto>> productLogs = new ArrayList<>();
             for (ProductDto product : products) {
-                /* Devo rimuovere i vecchi allergeni al prodotto */
-                List<Integer> allergensInProduct = product.getAllergens();
-                List<Integer> olds = utilities.convertStringToIntList(ingredient.getAllergens()).stream().map(o -> -o).collect(Collectors.toList());
-
-                // Rimuove ogni elemento di `olds` una sola volta da `allergensInProduct`
-                for (Integer oldAllergen : olds) {
-                    allergensInProduct.remove(oldAllergen);  // rimuove solo la prima occorrenza di `oldAllergen`
-                }
+                // Gli allergeni dell'ingrediente non sono copiati sul prodotto: basta togliere l'ingrediente
                 ProductDto pDto = new ProductDto(
                         product.getId(),
                         product.getName(),
@@ -185,8 +155,7 @@ public class IngredientService {
                         product.isAvailable(),
                         product.getPosition_progressive()
                 );
-                // Converte nuovamente in stringa e aggiorna il campo `allergens` del prodotto
-                product.setAllergens(allergensInProduct);
+                pDto.setTraces(product.getTraces());
 
                 // Devo rimuovere l'ingrediente al prodotto
                 List<Long> ingredientsInProduct = product.getIngredients();

@@ -61,18 +61,16 @@ public class ProductService {
                 progressiveNumber++;
             }
 
-            List<Integer> allergensList = new ArrayList<>(addProduct.getAllergens().stream().filter(a -> a > 0).collect(Collectors.toList()));
-            List<IngredientDto> allergensInIngredients = ingredientFinder.findAllByIdInAndIdAgencyAndDeletedList(addProduct.getIngredients(), idAgency);
-
-            for (IngredientDto ingredient : allergensInIngredients) {
-                if (!ingredient.getAllergens().isEmpty()) {
-                    List<Integer> alls = ingredient.getAllergens().stream().map(a -> -a).collect(Collectors.toList());
-                    allergensList.addAll(alls);
-                }
-            }
+            /*
+                Sul prodotto salvo solo gli allergeni dichiarati direttamente e le tracce.
+                Gli allergeni degli ingredienti non vengono più copiati: quelli effettivi
+                (prodotto ∪ ingredienti) li calcola il client, così restano sempre allineati.
+             */
+            List<Integer> allergensList = utilities.normalizeAllergens(addProduct.getAllergens());
+            List<Integer> tracesList = utilities.normalizeAllergens(addProduct.getTraces());
             if(file != null)
                 addProduct.setImage(fileUtils.uploadImageWithBucket(file, idAgency, idUser, "img"));
-            ProductJpa product = productRepository.save(new ProductJpa(
+            ProductJpa newProduct = new ProductJpa(
                     addProduct.getName(),
                     addProduct.getDescription(),
                     utilities.convertOptionInProductToString(options),
@@ -84,7 +82,9 @@ public class ProductService {
                     utilities.convertLongListToString(addProduct.getIngredients()),
                     addProduct.isAvailable(),
                     progressiveNumber
-            ));
+            );
+            newProduct.setTraces(utilities.convertIntListToString(tracesList));
+            ProductJpa product = productRepository.save(newProduct);
 
             EntityLog<ProductDto> productLog = new EntityLog<>(LogOperation.OTHER, null, productMapper.toDto(product), "function addProduct", idUser, idAgency);
             mongoProductRepository.save(productLog);
@@ -115,15 +115,12 @@ public class ProductService {
             ProductJpa product = optionalProduct.get();
             ProductDto oldProductDto = productMapper.toDto(product);
 
-            List<Integer> allergensList = new ArrayList<>(updateProduct.getAllergens().stream().filter(a -> a > 0).collect(Collectors.toList()));
+            // Solo allergeni dichiarati sul prodotto (vedi addProduct)
+            List<Integer> allergensList = utilities.normalizeAllergens(updateProduct.getAllergens());
             List<IngredientDto> ingredients = ingredientFinder.findAllByIdInAndIdAgencyAndDeletedList(updateProduct.getIngredients(), idAgency);
             List<Long> newProductIngredientsId = new ArrayList<>();
 
             for (IngredientDto ingredient : ingredients) {
-                if (!ingredient.getAllergens().isEmpty()) {
-                    List<Integer> alls = ingredient.getAllergens().stream().map(a -> -a).collect(Collectors.toList());
-                    allergensList.addAll(alls);
-                }
                 newProductIngredientsId.add(ingredient.getId());
             }
 
@@ -134,6 +131,9 @@ public class ProductService {
             product.setIngredients(utilities.convertLongListToString(newProductIngredientsId));
             product.setTags(utilities.convertIntListToString(updateProduct.getTags()));
             product.setAllergens(utilities.convertIntListToString(allergensList));
+            // Tracce non inviate (client non aggiornato): mantengo quelle esistenti
+            if (updateProduct.getTraces() != null)
+                product.setTraces(utilities.convertIntListToString(utilities.normalizeAllergens(updateProduct.getTraces())));
             productRepository.save(product);
 
             EntityLog productLog = new EntityLog<>(LogOperation.OTHER, oldProductDto, productMapper.toDto(product), "function updateProduct", idUser, idAgency);

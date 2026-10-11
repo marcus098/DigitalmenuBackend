@@ -28,6 +28,20 @@ public class LoyaltySettingsJpa {
     /** Tessere a timbri: descrizione del premio (es. "Caffè omaggio"). */
     private String stampsPrize;
 
+    /** Tipo di tessera emessa dal locale: POINTS, VISITS (timbri) o null = si sceglie a ogni emissione. */
+    private String programType;
+
+    /** NONE, YEARLY (azzeramento ogni anno a una data), INACTIVITY (azzeramento dopo N mesi senza movimenti). */
+    private String expiryPolicy;
+    private Integer expiryMonth;
+    private Integer expiryDay;
+    private Integer inactivityMonths;
+
+    /** Tessere a visite: spesa minima perché il conto valga come visita (null = qualsiasi importo). */
+    private Double minSpendForVisit;
+    /** Tessere a visite: al massimo una visita al giorno. */
+    private Boolean oneVisitPerDay;
+
     private OffsetDateTime updatedAt;
 
     public LoyaltySettingsJpa() {}
@@ -46,6 +60,20 @@ public class LoyaltySettingsJpa {
     public void setStampsForPrize(Integer stampsForPrize) { this.stampsForPrize = stampsForPrize; }
     public String getStampsPrize() { return stampsPrize; }
     public void setStampsPrize(String stampsPrize) { this.stampsPrize = stampsPrize; }
+    public String getProgramType() { return programType; }
+    public void setProgramType(String programType) { this.programType = programType; }
+    public String getExpiryPolicy() { return expiryPolicy; }
+    public void setExpiryPolicy(String expiryPolicy) { this.expiryPolicy = expiryPolicy; }
+    public Integer getExpiryMonth() { return expiryMonth; }
+    public void setExpiryMonth(Integer expiryMonth) { this.expiryMonth = expiryMonth; }
+    public Integer getExpiryDay() { return expiryDay; }
+    public void setExpiryDay(Integer expiryDay) { this.expiryDay = expiryDay; }
+    public Integer getInactivityMonths() { return inactivityMonths; }
+    public void setInactivityMonths(Integer inactivityMonths) { this.inactivityMonths = inactivityMonths; }
+    public Double getMinSpendForVisit() { return minSpendForVisit; }
+    public void setMinSpendForVisit(Double minSpendForVisit) { this.minSpendForVisit = minSpendForVisit; }
+    public Boolean getOneVisitPerDay() { return oneVisitPerDay; }
+    public void setOneVisitPerDay(Boolean oneVisitPerDay) { this.oneVisitPerDay = oneVisitPerDay; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(OffsetDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

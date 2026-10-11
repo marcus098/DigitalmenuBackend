@@ -13,6 +13,8 @@ public class AddProduct implements Request {
     private Long idCategory;
     private List<Integer> tags = new ArrayList<>();
     private List<Integer> allergens = new ArrayList<>();
+    // "Può contenere tracce di" (id 1..14)
+    private List<Integer> traces = new ArrayList<>();
     private List<Long> ingredients = new ArrayList<>();
     private boolean available;
 
@@ -52,6 +54,14 @@ public class AddProduct implements Request {
 
     public List<Integer> getAllergens() {
         return allergens;
+    }
+
+    public List<Integer> getTraces() {
+        return traces;
+    }
+
+    public void setTraces(List<Integer> traces) {
+        this.traces = traces;
     }
 
     public String getName() {
@@ -100,6 +110,7 @@ public class AddProduct implements Request {
                 ", idCategory=" + idCategory +
                 ", tags=" + tags +
                 ", allergens=" + allergens +
+                ", traces=" + traces +
                 ", ingredients=" + ingredients +
                 ", available=" + available +
                 '}';

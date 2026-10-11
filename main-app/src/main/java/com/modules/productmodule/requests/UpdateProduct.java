@@ -14,6 +14,9 @@ public class UpdateProduct implements Request {
     private Long idAgency;
     private List<Integer> tags = new ArrayList<>();
     private List<Integer> allergens = new ArrayList<>();
+    // "Può contenere tracce di" (id 1..14). null = parametro non inviato: le tracce esistenti
+    // restano invariate (client non aggiornati non le cancellano)
+    private List<Integer> traces;
     private List<Long> ingredients = new ArrayList<>();
     private boolean available;
     private int positionProgressive;
@@ -22,6 +25,14 @@ public class UpdateProduct implements Request {
 
     public List<Integer> getAllergens() {
         return allergens;
+    }
+
+    public List<Integer> getTraces() {
+        return traces;
+    }
+
+    public void setTraces(List<Integer> traces) {
+        this.traces = traces;
     }
 
     public String getName() {
@@ -119,6 +130,7 @@ public class UpdateProduct implements Request {
                 ", idAgency=" + idAgency +
                 ", tags=" + tags +
                 ", allergens=" + allergens +
+                ", traces=" + traces +
                 ", ingredients=" + ingredients +
                 ", available=" + available +
                 ", positionProgressive=" + positionProgressive +

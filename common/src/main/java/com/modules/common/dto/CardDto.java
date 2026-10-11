@@ -14,6 +14,15 @@ public class CardDto {
     private double priceForPoint;
     private String qrCodeUrl;
     private String createdAt;
+    private String holderName;
+    private String holderContact;
+    private String note;
+    /** Conti chiusi con la tessera collegata. */
+    private int visitsCount;
+    private long totalSpentCents;
+    private String lastVisitAt;
+    /** Data in cui il saldo attuale verrà azzerato (regole di scadenza del locale), null = non scade. */
+    private String expiresAt;
 
     public CardDto(long id, String code, boolean typePoints, int actualValue, int scope, double priceForPoint, String qrCodeUrl, String createdAt) {
         this.id = id;
@@ -102,4 +111,18 @@ public class CardDto {
         this.qrCodeUrl = qrCodeUrl;
     }
 
+    public String getHolderName() { return holderName; }
+    public void setHolderName(String holderName) { this.holderName = holderName; }
+    public String getHolderContact() { return holderContact; }
+    public void setHolderContact(String holderContact) { this.holderContact = holderContact; }
+    public String getNote() { return note; }
+    public void setNote(String note) { this.note = note; }
+    public int getVisitsCount() { return visitsCount; }
+    public void setVisitsCount(int visitsCount) { this.visitsCount = visitsCount; }
+    public long getTotalSpentCents() { return totalSpentCents; }
+    public void setTotalSpentCents(long totalSpentCents) { this.totalSpentCents = totalSpentCents; }
+    public String getLastVisitAt() { return lastVisitAt; }
+    public void setLastVisitAt(String lastVisitAt) { this.lastVisitAt = lastVisitAt; }
+    public String getExpiresAt() { return expiresAt; }
+    public void setExpiresAt(String expiresAt) { this.expiresAt = expiresAt; }
 }

@@ -90,11 +90,12 @@ public class CheckoutService {
         CardDto card = null;
         if (req.cardId() != null) {
             try {
-                CardService.CheckoutLoyalty l = cardService.applyCheckout(req.cardId(), idAgency, idUser, req.totalCents(),
+                CardService.CheckoutLoyalty l = cardService.applyCheckout(req.cardId(), idAgency, idUser, req.totalCents(), comandId,
                         req.pointsToUse(), req.redeemStamps(), req.earn());
                 co.setPointsUsed(l.card().isTypePoints() ? l.claimed() : 0);
                 co.setStampRedeemed(!l.card().isTypePoints() && l.claimed() > 0);
                 co.setPointsEarned(l.earned());
+                co.setLoyaltyNote(l.note());
                 card = l.card();
             } catch (Exception e) {
                 ErrorLog.logger.error("Movimenti tessera non riusciti alla chiusura della comanda " + comandId, e);

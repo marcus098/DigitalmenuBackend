@@ -233,6 +233,33 @@ docker compose up -d backend
 
 Se resta vuota il modulo risponde 503 ("non disponibile") e nei log compare `CONTACT: app.contact.to non configurato`.
 
+## 8quater. Menu in più lingue (Ollama)
+
+La pagina **Lingue del menu** della dashboard traduce nomi e descrizioni con un modello che gira su Ollama:
+i testi del menu non vengono inviati a servizi esterni. Senza Ollama la pagina funziona lo stesso, ma le
+traduzioni vanno scritte a mano.
+
+Requisiti indicativi per `qwen2.5:7b`: 8 GB di RAM liberi (meglio una GPU; su sola CPU un menu di 100 piatti
+in 4 lingue richiede qualche decina di minuti, ma il lavoro gira in background).
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull qwen2.5:7b
+# Ollama deve ascoltare anche sull'interfaccia Docker, ma NON su internet:
+sudo systemctl edit ollama    # aggiungi:  [Service]  Environment="OLLAMA_HOST=0.0.0.0:11434"
+sudo systemctl restart ollama
+sudo ufw deny 11434           # (o regola equivalente) la porta non deve essere raggiungibile dall'esterno
+
+cd ~/DigitalmenuFrontend
+# 🧑 in .env: APP_AI_ENABLED=true  (OLLAMA_BASE_URL di default punta all'host: http://host.docker.internal:11434)
+docker compose up -d backend
+docker compose exec backend sh -c 'wget -qO- http://host.docker.internal:11434/api/tags | head -c 200'   # elenco modelli = raggiungibile
+```
+
+Se Ollama gira su un'altra macchina, imposta `OLLAMA_BASE_URL` (e `OLLAMA_USERNAME`/`OLLAMA_PASSWORD` se è dietro
+un reverse proxy con basic auth). Le traduzioni dei testi nuovi partono con "Traduci ora" o, se il locale lo sceglie,
+ogni notte alle 4:30.
+
 ## 9. Verifica
 
 ```bash

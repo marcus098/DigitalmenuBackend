@@ -15,6 +15,8 @@ public abstract class Product {
     protected Long idAgency;
     protected String tags;
     protected String allergens;
+    // "Può contenere tracce di" (id allergeni 1..14, stesso formato di allergens)
+    protected String traces;
     protected String ingredients;
     protected boolean available;
     protected boolean deleted;
@@ -124,6 +126,14 @@ public abstract class Product {
 
     public String getIngredients() {
         return ingredients;
+    }
+
+    public String getTraces() {
+        return traces;
+    }
+
+    public void setTraces(String traces) {
+        this.traces = traces;
     }
 
     public String getTags() {

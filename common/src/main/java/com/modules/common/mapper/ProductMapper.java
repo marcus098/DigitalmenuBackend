@@ -25,7 +25,10 @@ public class ProductMapper {
         dto.setImage(product.getImage());
         dto.setAvailable(product.isAvailable());
         dto.setPosition_progressive(product.getPositionProgressive());
-        dto.setAllergens(utilities.convertStringToIntList(product.getAllergens()));
+        // Solo gli allergeni dichiarati sul prodotto: eventuali id negativi legacy (copie degli
+        // allergeni degli ingredienti) vengono scartati, il client li ricalcola dagli ingredienti
+        dto.setAllergens(utilities.normalizeAllergens(utilities.convertStringToIntList(product.getAllergens())));
+        dto.setTraces(utilities.normalizeAllergens(utilities.convertStringToIntList(product.getTraces())));
         dto.setIdCategory(product.getIdCategory());
         dto.setIngredients(utilities.convertStringToLongList(product.getIngredients()));
         dto.setTags(utilities.convertStringToIntList(product.getTags()));

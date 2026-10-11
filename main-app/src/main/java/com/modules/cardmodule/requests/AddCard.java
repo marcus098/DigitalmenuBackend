@@ -4,6 +4,9 @@ public class AddCard {
     private boolean typePoints;
     private int scope;
     private Double priceForPoint;
+    private String holderName;
+    private String holderContact;
+    private String note;
 
     public AddCard(){
 
@@ -32,6 +35,13 @@ public class AddCard {
     public void setPriceForPoint(Double priceForPoint) {
         this.priceForPoint = priceForPoint;
     }
+
+    public String getHolderName() { return holderName; }
+    public void setHolderName(String holderName) { this.holderName = holderName; }
+    public String getHolderContact() { return holderContact; }
+    public void setHolderContact(String holderContact) { this.holderContact = holderContact; }
+    public String getNote() { return note; }
+    public void setNote(String note) { this.note = note; }
 
     @Override
     public String toString() {

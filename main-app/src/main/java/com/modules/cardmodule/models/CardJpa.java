@@ -9,6 +9,17 @@ import java.time.OffsetDateTime;
 @Table(name = "cards")
 public class CardJpa extends Card {
 
+    // Dettagli e statistiche (colonne nullable: le tessere già emesse restano valide con ddl-auto=update)
+    private String holderName;
+    private String holderContact;
+    private String note;
+    private Integer visitsCount;
+    private Long totalSpentCents;
+    private OffsetDateTime lastVisitAt;
+    private OffsetDateTime lastActivityAt;
+    /** Da quando si accumula il saldo attuale (creazione o ultimo azzeramento): serve per l'azzeramento annuale. */
+    private OffsetDateTime balanceSince;
+
     public CardJpa(){
         super();
     }
@@ -127,4 +138,31 @@ public class CardJpa extends Card {
     public void setTypePoints(boolean typePoints) {
         super.setTypePoints(typePoints);
     }
+
+    @Column(length = 80)
+    public String getHolderName() { return holderName; }
+    public void setHolderName(String holderName) { this.holderName = holderName; }
+
+    @Column(length = 120)
+    public String getHolderContact() { return holderContact; }
+    public void setHolderContact(String holderContact) { this.holderContact = holderContact; }
+
+    @Column(length = 500)
+    public String getNote() { return note; }
+    public void setNote(String note) { this.note = note; }
+
+    public Integer getVisitsCount() { return visitsCount; }
+    public void setVisitsCount(Integer visitsCount) { this.visitsCount = visitsCount; }
+
+    public Long getTotalSpentCents() { return totalSpentCents; }
+    public void setTotalSpentCents(Long totalSpentCents) { this.totalSpentCents = totalSpentCents; }
+
+    public OffsetDateTime getLastVisitAt() { return lastVisitAt; }
+    public void setLastVisitAt(OffsetDateTime lastVisitAt) { this.lastVisitAt = lastVisitAt; }
+
+    public OffsetDateTime getLastActivityAt() { return lastActivityAt; }
+    public void setLastActivityAt(OffsetDateTime lastActivityAt) { this.lastActivityAt = lastActivityAt; }
+
+    public OffsetDateTime getBalanceSince() { return balanceSince; }
+    public void setBalanceSince(OffsetDateTime balanceSince) { this.balanceSince = balanceSince; }
 }

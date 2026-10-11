@@ -138,6 +138,21 @@ public class Utilities {
         return list;
     }
 
+    /**
+     * Normalizza una lista di allergeni (Reg. UE 1169/2011, id 1..14): scarta null e id fuori range,
+     * rimuove i duplicati e ordina. Non modifica la lista ricevuta, che può essere null.
+     */
+    public List<Integer> normalizeAllergens(List<Integer> list) {
+        if (list == null)
+            return new ArrayList<>();
+        return list.stream()
+                .filter(Objects::nonNull)
+                .filter(i -> i >= 1 && i <= 14)
+                .distinct()
+                .sorted()
+                .collect(Collectors.toList());
+    }
+
     public List<OptionInProduct> convertStringToOptionInProduct(String str) {
         if (str == null || str.isEmpty())
             return new ArrayList<>();

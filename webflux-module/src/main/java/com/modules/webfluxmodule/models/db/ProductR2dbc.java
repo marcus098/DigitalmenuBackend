@@ -109,6 +109,16 @@ public class ProductR2dbc extends Product {
     }
 
     @Override
+    public String getTraces() {
+        return super.getTraces();
+    }
+
+    @Override
+    public void setTraces(String traces) {
+        super.setTraces(traces);
+    }
+
+    @Override
     public String getTags() {
         return super.getTags();
     }

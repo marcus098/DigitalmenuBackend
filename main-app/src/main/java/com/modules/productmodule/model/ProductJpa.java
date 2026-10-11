@@ -126,6 +126,18 @@ public class ProductJpa extends Product {
         return super.getIngredients();
     }
 
+    // Colonna nullable: i prodotti esistenti restano validi (null = nessuna traccia)
+    @Column(name = "traces")
+    @Override
+    public String getTraces() {
+        return super.getTraces();
+    }
+
+    @Override
+    public void setTraces(String traces) {
+        super.setTraces(traces);
+    }
+
     @Override
     public String getTags() {
         return super.getTags();

@@ -1,6 +1,7 @@
 package com.modules.mainapp.controller;
 
 import com.modules.cardmodule.requests.AddCard;
+import com.modules.cardmodule.requests.CardDetailsRequest;
 import com.modules.cardmodule.requests.LoyaltySettingsDto;
 import com.modules.cardmodule.service.CardService;
 import com.modules.common.logs.errorlog.ErrorLog;
@@ -33,6 +34,29 @@ public class CardController {
         String error = settings.validate();
         if (error != null) return ResponseEntity.badRequest().body(Map.of("message", error));
         return ResponseEntity.ok(new DataResponse<>(cardService.updateSettings(settings)));
+    }
+
+    /** Storico movimenti della tessera (accrediti, utilizzi, azzeramenti, scadenze). */
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
+    @GetMapping("/{id}/movements")
+    public ResponseEntity<?> getMovements(@PathVariable("id") long id) {
+        return ResponseEntity.ok(new DataResponse<>(cardService.getMovements(id)));
+    }
+
+    /** Nome, contatto e note del titolare. */
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
+    @PutMapping("/{id}/details")
+    public ResponseEntity<?> updateDetails(@PathVariable("id") long id, @RequestBody CardDetailsRequest req) {
+        String error = req.validate();
+        if (error != null) return ResponseEntity.badRequest().body(Map.of("message", error));
+        return ResponseEntity.ok(new DataResponse<>(cardService.updateDetails(id, req)));
+    }
+
+    /** Azzera il saldo di tutte le tessere del locale. */
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
+    @PostMapping("/reset-all")
+    public ResponseEntity<?> resetAll() {
+        return ResponseEntity.ok(new DataResponse<>(cardService.resetAll()));
     }
 
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
