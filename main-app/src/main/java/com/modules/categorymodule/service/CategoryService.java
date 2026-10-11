@@ -1,5 +1,6 @@
 package com.modules.categorymodule.service;
 
+import com.modules.servletconfiguration.kafka.AvailabilityUpdateProducer;
 import com.modules.categorymodule.model.CategoryJpa;
 import com.modules.categorymodule.model.CategoryLog;
 import com.modules.categorymodule.repository.CategoryRepository;
@@ -29,6 +30,9 @@ import java.util.stream.Collectors;
 
 @Service
 public class CategoryService {
+
+    @Autowired(required = false)
+    private AvailabilityUpdateProducer availabilityUpdateProducer;
     @Autowired
     private CategoryRepository categoryRepository;
     @Autowired
@@ -273,6 +277,7 @@ public class CategoryService {
         CategoryDto categoryDto = new CategoryDto(category, new ArrayList<>());
         category.setAvailable(available);
         categoryRepository.save(category);
+        if (availabilityUpdateProducer != null) availabilityUpdateProducer.send(idAgency, AvailabilityUpdateProducer.Kind.CATEGORY, idCategory, available);
         mongoCategoryRepository.save(new CategoryLog(LogOperation.OTHER, categoryDto, new CategoryDto(category, new ArrayList<>()), "function setAvailable value " + available + ". list product not given", idUser, idAgency));
         return 200;
     }

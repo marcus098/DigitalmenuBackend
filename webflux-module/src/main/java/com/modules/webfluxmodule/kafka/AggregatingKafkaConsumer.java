@@ -108,6 +108,30 @@ public class AggregatingKafkaConsumer {
     }
 
     /**
+     * "Esaurito" in tempo reale: {idAgency, kind (PRODUCT|CATEGORY|INGREDIENT), id, available}.
+     * Arriva nel payload come data.availability; inviato a tutti i client (anche a chi ha fatto il cambio).
+     */
+    @KafkaListener(topics = "availability-updated", groupId = "${app.kafka.aggregator-group-id:aggregator-group}", containerFactory = "kafkaListenerContainerFactory")
+    public void listenAvailabilityBatch(List<String> jsonList) {
+        Map<Long, List<Map<String, Object>>> byAgency = new HashMap<>();
+        for (String json : jsonList) {
+            Map<String, Object> event = parseOrderEvent(json);
+            if (event == null || !(event.get("idAgency") instanceof Number agency)
+                    || !(event.get("id") instanceof Number) || !(event.get("available") instanceof Boolean)
+                    || !(event.get("kind") instanceof String)) continue;
+            Map<String, Object> projected = new HashMap<>();
+            projected.put("kind", event.get("kind"));
+            projected.put("id", event.get("id"));
+            projected.put("available", event.get("available"));
+            byAgency.computeIfAbsent(agency.longValue(), k -> new ArrayList<>()).add(projected);
+        }
+        byAgency.forEach((agencyId, events) -> {
+            addDataToCache(agencyId, "availability", events);
+            scheduleBroadcast(agencyId);
+        });
+    }
+
+    /**
      * Aggiunge dati alla cache in modo thread-safe.
      */
     private void addDataToCache(Long agencyId, String key, List<?> data) {

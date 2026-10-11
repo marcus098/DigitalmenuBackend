@@ -1,5 +1,6 @@
 package com.modules.ingredientmodule.service;
 
+import com.modules.servletconfiguration.kafka.AvailabilityUpdateProducer;
 import com.modules.common.dto.IngredientDto;
 import com.modules.common.dto.ProductDto;
 import com.modules.common.finders.ProductUtils;
@@ -29,6 +30,9 @@ import java.util.stream.Collectors;
 
 @Service
 public class IngredientService {
+
+    @Autowired(required = false)
+    private AvailabilityUpdateProducer availabilityUpdateProducer;
 
     @Autowired
     private IngredientRepository ingredientRepository;
@@ -205,6 +209,7 @@ public class IngredientService {
             IngredientDto ingredientDto = ingredientMapper.toDto(ingredient);
             ingredient.setAvailable(available);
             ingredientRepository.save(ingredient);
+            if (availabilityUpdateProducer != null) availabilityUpdateProducer.send(idAgency, AvailabilityUpdateProducer.Kind.INGREDIENT, ingredient.getId(), available);
             mongoIngredientRepository.save(new EntityLog<>(LogOperation.OTHER, ingredientDto, ingredientDto, "function setAvailable value " + available, idUser, idAgency));
             return 200;
         }catch (Exception e){

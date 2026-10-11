@@ -1,5 +1,6 @@
 package com.modules.productmodule.service;
 
+import com.modules.servletconfiguration.kafka.AvailabilityUpdateProducer;
 import com.modules.common.dto.IngredientDto;
 import com.modules.common.dto.ProductDto;
 import com.modules.common.finders.FileUtils;
@@ -33,6 +34,9 @@ import java.util.stream.Collectors;
 
 @Service
 public class ProductService {
+
+    @Autowired(required = false)
+    private AvailabilityUpdateProducer availabilityUpdateProducer;
     @Autowired
     private ProductRepository productRepository;
     @Autowired
@@ -217,6 +221,7 @@ public class ProductService {
 
             product1.setAvailable(available);
             productRepository.save(product1);
+            if (availabilityUpdateProducer != null) availabilityUpdateProducer.send(idAgency, AvailabilityUpdateProducer.Kind.PRODUCT, idProduct, available);
 
             EntityLog<ProductDto> productLog = new EntityLog<>(LogOperation.OTHER, oldProductDto, productMapper.toDto(product1), "function setAvailable, value " + available, idUser, idAgency);
             mongoProductRepository.save(productLog);
