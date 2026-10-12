@@ -5,7 +5,8 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "payments")
+// Indice per l'elenco pagamenti del locale filtrato per periodo (GET /api/payments?from&to), dal più recente
+@Table(name = "payments", indexes = @Index(name = "idx_payments_agency_created", columnList = "id_agency, created_at"))
 public class PaymentJpa {
 
     @Id

@@ -260,6 +260,31 @@ Se Ollama gira su un'altra macchina, imposta `OLLAMA_BASE_URL` (e `OLLAMA_USERNA
 un reverse proxy con basic auth). Le traduzioni dei testi nuovi partono con "Traduci ora" o, se il locale lo sceglie,
 ogni notte alle 4:30.
 
+## 8quinquies. Notifiche push all'app staff "Sala"
+
+Il backend avvisa i telefoni dello staff (titolare e camerieri approvati del locale), anche ad app chiusa, quando
+arriva un **ordine di un cliente** (QR/tavolo, asporto, domicilio, ordine da approvare, ordine prepagato appena
+confermato) o una **nuova prenotazione** dal sito. Gli ordini inseriti dallo staff non generano notifiche.
+L'invio passa dalla Expo Push API, che inoltra a FCM (Android) e APNs (iOS).
+
+- L'app registra il token del dispositivo con `POST /api/push-tokens` (`{"token":"ExponentPushToken[...]","platform":"android"}`)
+  dopo il login e lo rimuove al logout con `DELETE /api/push-tokens?token=...`. Tabella `push_tokens` (creata da
+  `ddl-auto=update`); i token che Expo segnala come `DeviceNotRegistered` vengono cancellati da soli.
+- **Server**: serve solo l'uscita HTTPS verso `exp.host` (porta 443). Verifica dal container:
+  ```bash
+  docker compose exec backend sh -c 'wget -q -O /dev/null --spider https://exp.host && echo OK'
+  ```
+- Config (`config/main-app`): `app.push.enabled=true` (default; `false` = i messaggi vengono solo loggati come
+  `PUSH (simulazione)`). `app.push.expo-access-token` è facoltativo: serve solo se sul progetto Expo è attiva
+  "Enhanced push security" (🧑 il token lo genera l'utente su expo.dev; Claude non lo stampa). In alternativa
+  variabile d'ambiente `APP_PUSH_EXPO_ACCESS_TOKEN`.
+- **Build dell'app (Android)**: le push arrivano solo se il progetto Expo ha le credenziali FCM: 🧑 creare il progetto
+  Firebase con package `it.axiomgroup.sala`, mettere `google-services.json` nell'app (`android.googleServicesFile`
+  in `app.json`) e caricare la chiave dell'account di servizio **FCM V1** su expo.dev (Credentials → Android →
+  FCM V1 service account key, oppure `eas credentials`). Per iOS servono la chiave APNs (gestita da EAS).
+- Canali Android usati: `orders` (ordini) e `reservations` (prenotazioni), entrambi creati dall'app.
+- Diagnostica: `docker compose logs backend | grep PUSH` (errori Expo, token rimossi, simulazioni).
+
 ## 9. Verifica
 
 ```bash
@@ -287,6 +312,33 @@ docker image prune -f
 
 Rollback: `git checkout <commit precedente>` in entrambi i repo, `docker compose build && docker compose up -d`.
 Ripristino DB dal backup del passo 2: 🧑 sempre su richiesta esplicita.
+
+### Fuso orario Europe/Rome (aggiornamento di ottobre 2026)
+
+Backend e webflux girano in **Europe/Rome** (`BusinessTime.useAsJvmDefault()` nei `main()`, `-Duser.timezone`
+e `TZ` nei Dockerfile, `TZ` nel compose). Prima i container erano in UTC e le date/ore senza fuso (comande,
+pagamenti, "riprende alle" della pausa asporto) risultavano indietro di 1-2 ore; i totali "di oggi" sbagliavano
+tra mezzanotte e le 2. Verifica dopo l'avvio: gli orari in `docker compose logs --tail=5 backend webflux` sono in ora italiana
+(il comando `date` nel container può restare in UTC: l'immagine alpine non ha tzdata, la JVM usa i suoi dati).
+
+- **Mongo** (comande, checkout, stampe): salva istanti, i dati vecchi si leggono già giusti. Niente da fare.
+- **Postgres**, colonne `timestamp without time zone` (`payments.created_at/updated_at`,
+  `takeaway_slot_config.paused_until`): le righe vecchie sono in ora UTC. Le altre date sono `OffsetDateTime`
+  (istanti) o giorni/orari inseriti dall'utente (prenotazioni, chiusure) e non cambiano.
+  Per allinearle, **una sola volta, con backend e webflux fermi**, prima di avviare la nuova versione
+  (backup del passo 2 prima!):
+
+  ```bash
+  docker compose stop backend webflux
+  docker compose exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" "$POSTGRES_DB"' \
+      < ../DigitalmenuBackend/deploy/migrations/2026-10_timezone_europe_rome.sql
+  docker compose build && docker compose up -d
+  ```
+
+  Lo script è idempotente (tabella `tz_migration_log`): rieseguirlo non fa nulla. Se lo si salta, l'unico
+  effetto è che i pagamenti precedenti all'aggiornamento appaiono 1-2 ore prima nello storico (e quelli fatti
+  tra mezzanotte e le 2 finiscono nel giorno precedente).
+- Non impostare `spring.jpa.properties.hibernate.jdbc.time_zone`: sposterebbe le colonne `LocalDateTime`.
 
 ## Cose note ancora aperte
 

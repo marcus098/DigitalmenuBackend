@@ -30,6 +30,7 @@ import com.stripe.model.EventDataObjectDeserializer;
 import com.stripe.model.PaymentIntent;
 import com.stripe.model.StripeObject;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -420,9 +421,30 @@ public class PaymentService implements ComandPaymentOperations {
         return t > 0 ? t : null;
     }
 
-    public List<PaymentJpa> getPaymentsForAgency() {
+    /** Pagamenti restituiti senza limit esplicito (anche senza periodo: niente più "tutto lo storico"). */
+    public static final int DEFAULT_PAYMENTS_LIMIT = 500;
+    public static final int MAX_PAYMENTS_LIMIT = 5000;
+
+    /**
+     * Pagamenti del locale dal più recente. from/to (giorni di calendario, estremi inclusi) vanno indicati
+     * insieme, al massimo un anno; senza periodo si restituiscono gli ultimi {@code limit}.
+     * created_at è un LocalDateTime nel fuso del server (Europe/Rome), quindi il giorno inizia a atStartOfDay().
+     *
+     * @throws IllegalArgumentException periodo o limite non validi (→ 400)
+     */
+    public List<PaymentJpa> getPaymentsForAgency(LocalDate from, LocalDate to, Integer limit) {
+        if ((from == null) != (to == null)) throw new IllegalArgumentException("Indicare sia from che to");
+        if (from != null && (to.isBefore(from) || from.plusYears(1).isBefore(to))) {
+            throw new IllegalArgumentException("Intervallo non valido");
+        }
+        if (limit != null && (limit < 1 || limit > MAX_PAYMENTS_LIMIT)) {
+            throw new IllegalArgumentException("limit deve essere tra 1 e " + MAX_PAYMENTS_LIMIT);
+        }
+        PageRequest page = PageRequest.of(0, limit != null ? limit : DEFAULT_PAYMENTS_LIMIT);
         long idAgency = authUserProvider.getAgencyId();
-        return paymentRepository.findByIdAgencyOrderByCreatedAtDesc(idAgency);
+        if (from == null) return paymentRepository.findByIdAgencyOrderByCreatedAtDesc(idAgency, page);
+        return paymentRepository.findByIdAgencyAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(
+                idAgency, from.atStartOfDay(), to.plusDays(1).atStartOfDay(), page);
     }
 
     public long getTodayTotalCentsForAgency() {

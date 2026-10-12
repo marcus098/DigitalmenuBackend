@@ -7,6 +7,7 @@ import com.modules.ordermodule.request.ChangeStatus;
 import com.modules.ordermodule.request.CheckoutRequest;
 import com.modules.ordermodule.service.CheckoutService;
 import com.modules.ordermodule.service.OrderComandService;
+import com.modules.ordermodule.service.TopProductsService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -28,6 +29,8 @@ public class OrderController {
     private OrderComandService orderComandService;
     @Autowired
     private CheckoutService checkoutService;
+    @Autowired
+    private TopProductsService topProductsService;
 
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
     @PostMapping("/insertWaiter")
@@ -86,6 +89,24 @@ public class OrderController {
             return ResponseEntity.badRequest().body(Map.of("message", "Intervallo non valido"));
         }
         return ResponseEntity.ok(checkoutService.summary(f, t));
+    }
+
+    /**
+     * Prodotti più venduti tra le comande COMPLETED create nel periodo (date yyyy-MM-dd, estremi inclusi,
+     * massimo un anno; limit 1..100, default 20). Risposta: [{idProduct, name, categoryName, quantity, revenueCents}]
+     * ordinata per quantità decrescente.
+     */
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
+    @GetMapping("/top-products")
+    public ResponseEntity<?> topProducts(@RequestParam("from") String from, @RequestParam("to") String to,
+                                         @RequestParam(value = "limit", required = false) Integer limit) {
+        try {
+            return ResponseEntity.ok(topProductsService.topProducts(LocalDate.parse(from), LocalDate.parse(to), limit));
+        } catch (DateTimeParseException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Date non valide"));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
     }
 
     /** Accetta un ordine "su richiesta" (AWAIT_APPROVAL → PENDING): incassa l'eventuale autorizzazione e stampa. */

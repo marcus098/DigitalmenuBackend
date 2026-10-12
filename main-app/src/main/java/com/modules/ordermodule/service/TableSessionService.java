@@ -22,6 +22,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.dao.DuplicateKeyException;
+import com.modules.pushmodule.service.StaffPushNotifier;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.index.Index;
@@ -75,6 +76,8 @@ public class TableSessionService {
     private IpRateLimiter rateLimiter;
     @Autowired
     private MongoTemplate mongoTemplate;
+    @Autowired(required = false)
+    private StaffPushNotifier staffPushNotifier;
 
     /** Garantisce al massimo UNA sessione OPEN per tavolo, anche con più istanze/richieste concorrenti. */
     @EventListener(ApplicationReadyEvent.class)
@@ -318,6 +321,11 @@ public class TableSessionService {
                 session.getId(), tableId, idAgency, created.size(), force);
 
         emit(session.getId(), "submitted");
+        // Push allo staff: una sola notifica per l'invio del tavolo. Niente push se l'invio l'ha forzato il cameriere
+        // o se le comande aspettano il prepagamento (partirà da OrderComandService.onPaymentCompleted).
+        if (!force && !prepay && staffPushNotifier != null) {
+            staffPushNotifier.newOrder(idAgency, created.stream().map(TableSessionJpa.SubmittedComand::getComandId).toList());
+        }
         return buildStateResponse(session, null, false);
     }
 

@@ -131,8 +131,9 @@ public class CheckoutService {
     public record DaySummary(String date, long totalCents, long discountCents, int count) {}
 
     /**
-     * closedAt è salvato nel fuso del server (UTC nei container), come gli altri timestamp delle comande;
-     * i giorni del riepilogo sono invece quelli del calendario italiano.
+     * closedAt è salvato nel fuso della JVM, come gli altri timestamp delle comande (Europe/Rome da quando
+     * le JVM girano in ora italiana, vedi BusinessTime: la conversione diventa un'identità). La conversione
+     * resta perché tiene i giorni del calendario italiano corretti anche se la JVM partisse in un altro fuso.
      */
     public List<DaySummary> summary(LocalDate from, LocalDate to) {
         long idAgency = auth.getAgencyId();

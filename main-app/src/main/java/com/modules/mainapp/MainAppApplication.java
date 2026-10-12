@@ -1,5 +1,6 @@
 package com.modules.mainapp;
 
+import com.modules.common.utilities.BusinessTime;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
@@ -16,6 +17,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 		"com.modules.ordermodule",
 		"com.modules.takeawaymodule",
 		"com.modules.printmodule",
+		"com.modules.pushmodule",
+		"com.modules.translationmodule",
 		"com.modules.stylemodule",
 		"com.modules.tablemodule",
 		"com.modules.waitermodule",
@@ -37,6 +40,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 		"com.modules.mainapp.reservation.repository",
 		"com.modules.mainapp.payment.repository",
 		"com.modules.takeawaymodule.repository",
+		"com.modules.pushmodule.repository",
+		"com.modules.translationmodule.repository",
 		"com.modules.mainapp.esl",
 })
 @EnableScheduling
@@ -53,6 +58,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 public class MainAppApplication {
 
 	public static void main(String[] args) {
+		// Orari di business in ora italiana anche se il container gira in UTC (vedi BusinessTime)
+		BusinessTime.useAsJvmDefault();
 		SpringApplication.run(MainAppApplication.class, args);
 	}
 

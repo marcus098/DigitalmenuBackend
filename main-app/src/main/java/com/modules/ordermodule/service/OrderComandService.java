@@ -30,6 +30,7 @@ import com.modules.ordermodule.request.AddComandClient;
 import com.modules.ordermodule.request.AddComandOrder;
 import com.modules.ordermodule.request.AddComandWaiter;
 import com.modules.ordermodule.request.AddProductToOrder;
+import com.modules.pushmodule.service.StaffPushNotifier;
 import com.modules.servletconfiguration.security.AuthenticatedUserProvider;
 import com.modules.takeawaymodule.service.TakeawaySlotService;
 import jakarta.persistence.EntityNotFoundException;
@@ -92,6 +93,9 @@ public class OrderComandService {
     /** Lazy: PaymentService dipende (tramite il calcolo del totale) da questo service. */
     @Autowired
     private ObjectProvider<ComandPaymentOperations> paymentOperations;
+    /** Push ai dispositivi dello staff (app "Sala"); assente nei test unitari. */
+    @Autowired(required = false)
+    private StaffPushNotifier staffPushNotifier;
 
     /** Esito della creazione di una comanda pubblica: AWAIT_PAYMENT = il cliente deve pagare subito. */
     public record CreationResult(String id, ComandStatus status) {
@@ -332,7 +336,10 @@ public class OrderComandService {
 
             Comand saved = mongoComandRepository.save(comand);
             // Prepagamento: niente stampa/dashboard finché Stripe non conferma (vedi onPaymentCompleted)
-            if (!prepay) notifyComandCreated(saved);
+            if (!prepay) {
+                notifyComandCreated(saved);
+                pushToStaff(saved);
+            }
             return new CreationResult(saved.getId(), saved.getStatus());
         } catch (Exception e) {
             ErrorLog.logger.error("Errore aggiunta ordine da client", e);
@@ -400,12 +407,22 @@ public class OrderComandService {
                 case AWAIT_APPROVAL -> notifyAwaitingApproval(saved);
                 default -> { /* AWAIT_PAYMENT: tutto parte da onPaymentCompleted / onPaymentAuthorized */ }
             }
+            if (status != ComandStatus.AWAIT_PAYMENT) pushToStaff(saved);
             return new CreationResult(saved.getId(), saved.getStatus());
         } catch (Exception e) {
             takeawaySlotService.releaseSlot(reservation.key(), products);
             ErrorLog.logger.error("Errore aggiunta ordine asporto pubblico", e);
             return null;
         }
+    }
+
+    /**
+     * Push ai dispositivi dello staff per un ordine di un CLIENTE che richiede attenzione (nuovo o da approvare).
+     * Mai per gli ordini inseriti dallo staff (addOrderWaiter) né all'approvazione (la fa lo staff stesso).
+     */
+    private void pushToStaff(Comand c) {
+        if (staffPushNotifier == null || c == null || c.getIdAgency() == null) return;
+        staffPushNotifier.newOrder(c.getIdAgency(), c.getId());
     }
 
     /** Ordine "su richiesta" visibile al locale: evento Kafka (dashboard + SSE) ma niente ComandCreatedEvent/stampa. */
@@ -434,6 +451,7 @@ public class OrderComandService {
         c.setStatus(target);
         if (target == ComandStatus.AWAIT_APPROVAL) notifyAwaitingApproval(c);
         else notifyComandCreated(c);
+        pushToStaff(c);
         return true;
     }
 
@@ -452,6 +470,7 @@ public class OrderComandService {
                 });
         if (!moved) return false;
         notifyAwaitingApproval(c);
+        pushToStaff(c);
         return true;
     }
 

@@ -1,6 +1,7 @@
 package com.modules.mainapp.controller;
 
 import com.modules.common.responses.DataResponse;
+import com.modules.mainapp.reservation.dto.StaffReservationRequest;
 import com.modules.mainapp.reservation.entity.ReservationJpa;
 import com.modules.mainapp.reservation.service.ReservationService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -34,6 +35,22 @@ public class ReservationController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
         return ResponseEntity.ok(new DataResponse<>(reservationService.getForAgencyBetween(from, to)));
+    }
+
+    /** Staff: nuova prenotazione da telefonata o walk-in (default CONFIRMED, nessun SMS salvo notifyCustomer). */
+    @PostMapping
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN','ROLE_WAITER')")
+    public ResponseEntity<?> create(@RequestBody StaffReservationRequest body) {
+        return ResponseEntity.ok(new DataResponse<>(reservationService.createStaffReservation(body)));
+    }
+
+    /** Staff: modifica dati della prenotazione (campi null invariati). */
+    @PutMapping("/{id}")
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN','ROLE_WAITER')")
+    public ResponseEntity<?> update(@PathVariable long id, @RequestBody StaffReservationRequest body) {
+        return reservationService.updateStaffReservation(id, body)
+                .map(r -> ResponseEntity.ok(new DataResponse<>(r)))
+                .orElse(ResponseEntity.notFound().build());
     }
 
     @PutMapping("/{id}/status")

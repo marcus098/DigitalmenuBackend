@@ -34,6 +34,8 @@ public class ReservationReminderJob {
             List<ReservationJpa> tomorrow24h = reservationRepository
                     .findByStatusAndReservationDateAndReminder24hSentFalse("CONFIRMED", tomorrow);
             for (ReservationJpa r : tomorrow24h) {
+                // Walk-in/telefonata senza numero: niente promemoria
+                if (r.getCustomerPhone() == null || r.getCustomerPhone().isBlank()) continue;
                 String msg = String.format(
                         "Ciao %s! Ti ricordiamo la prenotazione di domani alle %s per %d %s. A presto!",
                         r.getCustomerName(),
@@ -51,6 +53,7 @@ public class ReservationReminderJob {
                     .findByStatusAndReservationDateAndReminder1hSentFalse("CONFIRMED", today);
             for (ReservationJpa r : today1h) {
                 if (r.getReservationTime() == null) continue;
+                if (r.getCustomerPhone() == null || r.getCustomerPhone().isBlank()) continue;
                 long minsUntil = ChronoUnit.MINUTES.between(now, r.getReservationTime());
                 if (minsUntil >= 55 && minsUntil <= 65) {
                     String msg = String.format(

@@ -417,6 +417,8 @@ public class Utilities {
     }
 
     public List<OptionInProduct> convertOptionsRequestToPtions(List<String> optionsJsonList) {
+        // Nessuna variante = richiesta non valida (400), invece di un NullPointerException (500)
+        if (optionsJsonList == null || optionsJsonList.isEmpty()) return null;
         List<OptionInProduct> optionList = new ArrayList<>();
         ObjectMapper objectMapper = new ObjectMapper();
         try {

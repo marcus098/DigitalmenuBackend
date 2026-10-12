@@ -15,6 +15,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.Map;
 import java.util.function.Supplier;
 
@@ -31,10 +33,24 @@ public class PaymentController {
     @Autowired
     private AuthenticatedUserProvider authUserProvider;
 
+    /**
+     * Pagamenti del locale dal più recente. Parametri opzionali: from/to (yyyy-MM-dd, estremi inclusi, insieme,
+     * massimo un anno) e limit (default 500, massimo 5000). Senza periodo: gli ultimi {@code limit} pagamenti.
+     */
     @GetMapping
     @PreAuthorize("hasAnyRole('ROLE_ADMIN','ROLE_WAITER')")
-    public ResponseEntity<?> getAll() {
-        return ResponseEntity.ok(new DataResponse<>(paymentService.getPaymentsForAgency()));
+    public ResponseEntity<?> getAll(@RequestParam(value = "from", required = false) String from,
+                                    @RequestParam(value = "to", required = false) String to,
+                                    @RequestParam(value = "limit", required = false) Integer limit) {
+        try {
+            LocalDate f = from == null || from.isBlank() ? null : LocalDate.parse(from);
+            LocalDate t = to == null || to.isBlank() ? null : LocalDate.parse(to);
+            return ResponseEntity.ok(new DataResponse<>(paymentService.getPaymentsForAgency(f, t, limit)));
+        } catch (DateTimeParseException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Date non valide"));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
     }
 
     @GetMapping("/today-total")

@@ -32,7 +32,9 @@ import javax.sql.DataSource;
         "com.modules.mainapp.esl",
         "com.modules.mainapp.payment.entity",
         "com.modules.takeawaymodule.model",
-        "com.modules.mainapp.reservation.entity"
+        "com.modules.mainapp.reservation.entity",
+        "com.modules.pushmodule.model",
+        "com.modules.translationmodule.model"
 })
 public class JpaConf {
     @Value("${spring.datasource.url}")
@@ -66,7 +68,9 @@ public class JpaConf {
                 "com.modules.mainapp.esl",
                 "com.modules.mainapp.payment.entity",
         "com.modules.takeawaymodule.model",
-                "com.modules.mainapp.reservation.entity"
+                "com.modules.mainapp.reservation.entity",
+                "com.modules.pushmodule.model",
+                "com.modules.translationmodule.model"
         );
         factory.setJpaVendorAdapter(hibernateJpaVendorAdapter());
         factory.setPersistenceProviderClass(HibernatePersistenceProvider.class);

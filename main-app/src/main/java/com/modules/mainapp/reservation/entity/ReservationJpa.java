@@ -40,6 +40,10 @@ public class ReservationJpa {
     @Column(name = "status", nullable = false)
     private String status = "PENDING";
 
+    /** Origine: PUBLIC (modulo cliente) o STAFF (telefonata/walk-in). Null = righe precedenti, cioè PUBLIC. */
+    @Column(name = "source")
+    private String source;
+
     @Column(name = "reminder_24h_sent", nullable = false)
     private boolean reminder24hSent = false;
 
@@ -94,6 +98,9 @@ public class ReservationJpa {
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+
+    public String getSource() { return source; }
+    public void setSource(String source) { this.source = source; }
 
     public boolean isReminder24hSent() { return reminder24hSent; }
     public void setReminder24hSent(boolean v) { this.reminder24hSent = v; }

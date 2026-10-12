@@ -1,5 +1,6 @@
 package com.modules.common.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonView;
 import com.modules.common.model.db.Waiter;
 
@@ -13,6 +14,9 @@ public class WaiterDto {
     private String sessionUpdating;
     @JsonView(Views.Updating.class)
     private String changeType;
+    /** Approvato dal titolare (null quando non rilevante, es. negli eventi in tempo reale) */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean confirmed;
 
     public WaiterDto(){
 
@@ -34,6 +38,14 @@ public class WaiterDto {
         this.phone = phone;
         this.sessionUpdating = sessionUpdating;
         this.changeType = changeType;
+    }
+
+    public Boolean getConfirmed() {
+        return confirmed;
+    }
+
+    public void setConfirmed(Boolean confirmed) {
+        this.confirmed = confirmed;
     }
 
     public Long getId() {

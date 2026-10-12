@@ -13,6 +13,8 @@ server.forward-headers-strategy=framework
 spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect
 spring.jpa.show-sql=false
 spring.jpa.hibernate.ddl-auto=update
+# Fuso: la JVM gira in Europe/Rome (vedi docs/SERVER_DEPLOY.md). NON impostare hibernate.jdbc.time_zone:
+# sposterebbe le colonne LocalDateTime (payments.created_at, takeaway_slot_config.paused_until).
 
 # Sovrascritte dal compose (SPRING_DATASOURCE_*), lasciate per completezza
 spring.datasource.url=jdbc:postgresql://postgres:5432/digitalmenu
@@ -94,6 +96,13 @@ app.ai.ollama.password=
 app.ai.model.translate=qwen2.5:7b
 app.ai.timeout-seconds=120
 app.ai.num-ctx=8192
+
+# Notifiche push all'app staff "Sala" (Expo Push API: nuovi ordini dei clienti e prenotazioni). Vedi docs/SERVER_DEPLOY.md.
+# false = nessun invio, i messaggi vengono solo loggati ("PUSH (simulazione)"). Il server deve raggiungere https://exp.host.
+app.push.enabled=true
+# Facoltativo: access token Expo, serve solo se sul progetto Expo è attiva "Enhanced push security".
+# Sovrascrivibile da env APP_PUSH_EXPO_ACCESS_TOKEN. Non committare il valore.
+app.push.expo-access-token=
 
 twilio.enabled=false
 twilio.account-sid=

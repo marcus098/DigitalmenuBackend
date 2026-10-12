@@ -1,6 +1,7 @@
 package com.modules.mainapp.payment.repository;
 
 import com.modules.mainapp.payment.entity.PaymentJpa;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -17,7 +18,11 @@ import java.util.Optional;
 public interface PaymentRepository extends JpaRepository<PaymentJpa, Long> {
     Optional<PaymentJpa> findByStripePaymentIntentId(String stripePaymentIntentId);
     Optional<PaymentJpa> findBySumupCheckoutId(String sumupCheckoutId);
-    List<PaymentJpa> findByIdAgencyOrderByCreatedAtDesc(long idAgency);
+    /** Ultimi pagamenti del locale (dal più recente), al massimo pageable.getPageSize(). */
+    List<PaymentJpa> findByIdAgencyOrderByCreatedAtDesc(long idAgency, Pageable pageable);
+    /** Pagamenti creati in [from, to) dal più recente: range sull'indice (id_agency, created_at). */
+    List<PaymentJpa> findByIdAgencyAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(
+            long idAgency, LocalDateTime from, LocalDateTime to, Pageable pageable);
     List<PaymentJpa> findByIdAgencyAndCreatedAtBetweenAndStatus(long idAgency, LocalDateTime from, LocalDateTime to, String status);
     boolean existsByComandIdAndStatus(String comandId, String status);
     Optional<PaymentJpa> findFirstByComandIdAndStatusOrderByCreatedAtDesc(String comandId, String status);

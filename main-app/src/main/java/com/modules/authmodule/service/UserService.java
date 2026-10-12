@@ -303,7 +303,11 @@ public class UserService implements UserDetailsService {
         return userRepository
                 .findAllByIdAgencyAndDeletedAndRole(idAgency, false, ROLE_WAITER)
                 .stream()
-                .map(waiter -> new WaiterDto(waiter.getId(), waiter.getName(), waiter.getSurname(), waiter.getEmail(), waiter.getPhoneNumber()))
+                .map(waiter -> {
+                    WaiterDto dto = new WaiterDto(waiter.getId(), waiter.getName(), waiter.getSurname(), waiter.getEmail(), waiter.getPhoneNumber());
+                    dto.setConfirmed(waiter.isGeneralConfirmed());
+                    return dto;
+                })
                 .collect(Collectors.toList());
     }
 

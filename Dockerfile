@@ -24,8 +24,12 @@ USER app:app
 # via variabili d'ambiente (relaxed binding Spring), es. SPRING_DATASOURCE_URL, SPRING_DATASOURCE_PASSWORD,
 # SPRING_DATA_MONGODB_URI, SPRING_KAFKA_BOOTSTRAP_SERVERS, oppure montando un file e usando
 # SPRING_CONFIG_ADDITIONAL_LOCATION=/config/ (es. -v ./config:/config:ro).
+# Fuso orario del business: le date/ore senza offset (comande, pagamenti, pausa asporto) sono ore italiane.
+# La JVM usa il proprio database dei fusi (non serve tzdata); anche il main() imposta Europe/Rome.
+ENV TZ=Europe/Rome
 EXPOSE 8085
 ENTRYPOINT ["java", \
   "-XX:+UseContainerSupport", \
   "-XX:MaxRAMPercentage=75.0", \
+  "-Duser.timezone=Europe/Rome", \
   "-jar", "app.jar"]

@@ -39,7 +39,7 @@ import java.util.stream.Stream;
 
 @Service
 public class CardService {
-    /** Giorno "di calendario" del locale: i container girano in UTC. */
+    /** Giorno "di calendario" del locale (esplicito: non dipende dal fuso della JVM, vedi BusinessTime). */
     static final ZoneId BUSINESS_ZONE = ZoneId.of("Europe/Rome");
 
     @Autowired
