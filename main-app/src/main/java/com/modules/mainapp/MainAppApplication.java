@@ -19,6 +19,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 		"com.modules.printmodule",
 		"com.modules.pushmodule",
 		"com.modules.translationmodule",
+		"com.modules.aimodule",
 		"com.modules.stylemodule",
 		"com.modules.tablemodule",
 		"com.modules.waitermodule",
@@ -42,6 +43,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 		"com.modules.takeawaymodule.repository",
 		"com.modules.pushmodule.repository",
 		"com.modules.translationmodule.repository",
+		"com.modules.aimodule.repository",
 		"com.modules.mainapp.esl",
 })
 @EnableScheduling

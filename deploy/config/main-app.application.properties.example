@@ -94,6 +94,9 @@ app.ai.ollama.base-url=http://localhost:11434
 app.ai.ollama.username=
 app.ai.ollama.password=
 app.ai.model.translate=qwen2.5:7b
+# AxiomAI (riepiloghi, consigli sul menu, descrizioni dei piatti): modello dedicato opzionale.
+# Vuoto o commentato = usa lo stesso modello delle traduzioni (app.ai.model.translate).
+#app.ai.model.insights=
 app.ai.timeout-seconds=120
 app.ai.num-ctx=8192
 

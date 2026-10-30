@@ -40,6 +40,9 @@ public abstract class Style {
     private Boolean showWhyUs;
     private Boolean showBooking;
     private Boolean showTicker;
+    // Sito vetrina a sezioni: JSON {"version":1,"global":{...},"sections":[...]} salvato come testo.
+    // NULL = pagina pubblica "classica" costruita dai campi sopra.
+    private String landingConfig;
     private OffsetDateTime updatedAt;
     private boolean deleted;
 
@@ -303,6 +306,9 @@ public abstract class Style {
 
     public Boolean getShowTicker() { return showTicker; }
     public void setShowTicker(Boolean showTicker) { this.showTicker = showTicker; }
+
+    public String getLandingConfig() { return landingConfig; }
+    public void setLandingConfig(String landingConfig) { this.landingConfig = landingConfig; }
 
     public OffsetDateTime getUpdatedAt() {
         return updatedAt;

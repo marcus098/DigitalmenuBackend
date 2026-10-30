@@ -69,7 +69,14 @@ public class TopProductsService {
 
     public List<TopProduct> topProducts(LocalDate from, LocalDate to, Integer limit) {
         int max = validate(from, to, limit);
-        long idAgency = auth.getAgencyId();
+        return topProducts(auth.getAgencyId(), from, to, max);
+    }
+
+    /**
+     * Come {@link #topProducts(LocalDate, LocalDate, Integer)} ma con il locale esplicito e senza validazione dei
+     * parametri: per usi interni senza utente autenticato (es. job notturno di AxiomAI). from/to inclusi.
+     */
+    public List<TopProduct> topProducts(long idAgency, LocalDate from, LocalDate to, int max) {
         // createdAt è un LocalDateTime salvato da Spring come Date nel fuso del server (Europe/Rome):
         // stessa conversione per gli estremi del periodo
         ZoneId server = ZoneId.systemDefault();
@@ -147,6 +154,21 @@ public class TopProductsService {
             }
         }
         return cents;
+    }
+
+    /**
+     * Prezzo unitario di una riga prodotto così come salvata nella comanda (orders.products[i]), con le stesse regole
+     * di {@link #unitCents(Document)}.
+     */
+    public static long lineUnitCents(Document product) {
+        Document key = new Document("unitPriceCents", product.get("unitPriceCents"));
+        if (product.get("productOption") instanceof Document opt) key.append("optionPrice", opt.get("price"));
+        if (product.get("ingredientsPlus") instanceof List<?> extras) {
+            List<Object> prices = new ArrayList<>();
+            for (Object e : extras) if (e instanceof Document d) prices.add(d.get("price"));
+            key.append("extras", prices);
+        }
+        return unitCents(key);
     }
 
     private static long num(Object o) {

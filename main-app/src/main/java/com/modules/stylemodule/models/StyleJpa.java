@@ -121,6 +121,10 @@ public class StyleJpa extends Style {
     public Boolean getShowTicker() { return super.getShowTicker(); }
 
     @Override
+    @Column(name = "landing_config", columnDefinition = "TEXT")
+    public String getLandingConfig() { return super.getLandingConfig(); }
+
+    @Override
     public String getAddress() {
         return super.getAddress();
     }

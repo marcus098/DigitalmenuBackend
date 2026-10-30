@@ -260,6 +260,23 @@ Se Ollama gira su un'altra macchina, imposta `OLLAMA_BASE_URL` (e `OLLAMA_USERNA
 un reverse proxy con basic auth). Le traduzioni dei testi nuovi partono con "Traduci ora" o, se il locale lo sceglie,
 ogni notte alle 4:30.
 
+## 8quater-bis. AxiomAI: riepiloghi e consigli
+
+Per il titolare la dashboard e l'app "Sala" mostrano tre card: **Com'è andata ieri**, **La settimana** e
+**Consigli sul menu**, più il pulsante **Scrivi con AI** nella scheda del piatto. I numeri (incasso lordo delle
+comande completate, comande, scontrino medio, prenotazioni, piatti esauriti, confronti con le settimane
+precedenti) sono calcolati dal backend; l'AI scrive solo il testo e non può inventare numeri.
+
+- Usa lo **stesso Ollama** delle traduzioni (`APP_AI_ENABLED=true`, vedi sopra): nessuna configurazione in più.
+- Modello opzionale dedicato: `app.ai.model.insights` nel `config/` di main-app; vuoto = stesso modello di
+  `app.ai.model.translate`.
+- Job notturno alle **5:30** (ora italiana, dopo le traduzioni delle 4:30): riepilogo di ieri per ogni locale con
+  almeno una comanda completata; il lunedì anche la settimana precedente e i consigli sugli ultimi 28 giorni.
+  Il titolare può rigenerare una card con "Genera ora" (al massimo una volta ogni 10 minuti per tipo).
+- **Senza Ollama** (o se non risponde) le card funzionano lo stesso: mostrano un riepilogo scritto dal backend con
+  gli stessi numeri, senza il badge "AxiomAI". Solo "Scrivi con AI" risponde "non disponibile".
+- I dati restano sul server: tabella Postgres `ai_insights` (creata da Hibernate all'avvio).
+
 ## 8quinquies. Notifiche push all'app staff "Sala"
 
 Il backend avvisa i telefoni dello staff (titolare e camerieri approvati del locale), anche ad app chiusa, quando

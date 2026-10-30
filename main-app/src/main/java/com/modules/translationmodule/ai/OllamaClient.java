@@ -33,6 +33,9 @@ public class OllamaClient {
     private String password;
     @Value("${app.ai.model.translate:qwen2.5:7b}")
     private String translateModel;
+    /** Modello per riepiloghi/consigli AxiomAI e descrizioni piatti; vuoto = stesso modello delle traduzioni. */
+    @Value("${app.ai.model.insights:}")
+    private String insightsModel;
     @Value("${app.ai.timeout-seconds:120}")
     private int timeoutSeconds;
     @Value("${app.ai.num-ctx:8192}")
@@ -67,9 +70,13 @@ public class OllamaClient {
 
     public String translateModel() { return translateModel; }
 
+    public String insightsModel() {
+        return insightsModel == null || insightsModel.isBlank() ? translateModel : insightsModel.trim();
+    }
+
     /** Chat non in streaming; con {@code json} Ollama è vincolato a rispondere con un oggetto JSON. */
     public String chat(String model, List<ChatMessage> messages, boolean json, double temperature) {
-        if (!enabled) throw new AiUnavailableException("Traduzione automatica non attiva sul server");
+        if (!enabled) throw new AiUnavailableException("Servizio AI non attivo sul server");
 
         Map<String, Object> options = new LinkedHashMap<>();
         options.put("temperature", temperature);
@@ -96,13 +103,13 @@ public class OllamaClient {
             String err = e.getResponseBodyAsString();
             ErrorLog.logger.warn("Ollama: errore HTTP {} (model={}): {}", e.getStatusCode().value(), model,
                     err.length() > 300 ? err.substring(0, 300) : err);
-            throw new AiUnavailableException("Il servizio di traduzione ha risposto con un errore", e);
+            throw new AiUnavailableException("Il servizio AI ha risposto con un errore", e);
         } catch (RestClientException e) {
             ErrorLog.logger.warn("Ollama non raggiungibile (model={}, dopo {} ms): {}", model, System.currentTimeMillis() - start, e.getMessage());
-            throw new AiUnavailableException("Servizio di traduzione non raggiungibile", e);
+            throw new AiUnavailableException("Servizio AI non raggiungibile", e);
         }
         String content = response == null ? null : response.path("message").path("content").asText(null);
-        if (content == null || content.isBlank()) throw new AiUnavailableException("Risposta vuota dal servizio di traduzione");
+        if (content == null || content.isBlank()) throw new AiUnavailableException("Risposta vuota dal servizio AI");
         return content;
     }
 }

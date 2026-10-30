@@ -33,6 +33,7 @@ public class UpdateStyle {
     private Boolean showWhyUs;
     private Boolean showBooking;
     private Boolean showTicker;
+    private String landingConfig;
 
     public UpdateStyle() {
 
@@ -213,4 +214,7 @@ public class UpdateStyle {
 
     public Boolean getShowTicker() { return showTicker; }
     public void setShowTicker(Boolean showTicker) { this.showTicker = showTicker; }
+
+    public String getLandingConfig() { return landingConfig; }
+    public void setLandingConfig(String landingConfig) { this.landingConfig = landingConfig; }
 }

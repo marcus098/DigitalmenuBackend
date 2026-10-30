@@ -43,6 +43,8 @@ public class StyleDto {
     private Boolean showWhyUs;
     private Boolean showBooking;
     private Boolean showTicker;
+    // landingConfig: JSON object stored as text, exposed parsed (null = classic landing).
+    private JsonNode landingConfig;
     @JsonView(Views.Updating.class)
     private String sessionUpdating;
     @JsonView(Views.Updating.class)
@@ -90,6 +92,7 @@ public class StyleDto {
         this.showWhyUs = style.getShowWhyUs();
         this.showBooking = style.getShowBooking();
         this.showTicker = style.getShowTicker();
+        this.landingConfig = parseLandingConfig(style.getLandingConfig());
     }
 
     private static final ObjectMapper FEATURES_MAPPER = new ObjectMapper();
@@ -100,6 +103,17 @@ public class StyleDto {
         try {
             JsonNode node = FEATURES_MAPPER.readTree(raw);
             return node != null && node.isArray() ? node : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Parses the stored landing config; null (classic landing) if missing or not a JSON object. */
+    private static JsonNode parseLandingConfig(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            JsonNode node = FEATURES_MAPPER.readTree(raw);
+            return node != null && node.isObject() ? node : null;
         } catch (Exception e) {
             return null;
         }
@@ -324,6 +338,9 @@ public class StyleDto {
 
     public Boolean getShowTicker() { return showTicker; }
     public void setShowTicker(Boolean showTicker) { this.showTicker = showTicker; }
+
+    public JsonNode getLandingConfig() { return landingConfig; }
+    public void setLandingConfig(JsonNode landingConfig) { this.landingConfig = landingConfig; }
 
     public String getSessionUpdating() {
         return sessionUpdating;

@@ -92,6 +92,8 @@ public class StyleService {
         if (updateStyle.getShowWhyUs() != null) style.setShowWhyUs(updateStyle.getShowWhyUs());
         if (updateStyle.getShowBooking() != null) style.setShowBooking(updateStyle.getShowBooking());
         if (updateStyle.getShowTicker() != null) style.setShowTicker(updateStyle.getShowTicker());
+        // Sito vetrina a sezioni: assente = invariato, stringa vuota = torna al sito classico.
+        if (updateStyle.getLandingConfig() != null) style.setLandingConfig(LandingConfigValidator.validOrNull(updateStyle.getLandingConfig()));
 
         style.setUpdatedAt(OffsetDateTime.now());
 
@@ -99,6 +101,25 @@ public class StyleService {
         ErrorLog.logger.info("Style updated for agency {}", idAgency);
 
         return new StyleDto(style);
+    }
+
+    private static final long MAX_LANDING_IMAGE_BYTES = 10L * 1024 * 1024;
+
+    /**
+     * Carica una foto del sito vetrina (hero, galleria, chi siamo…) nel bucket del locale
+     * con la stessa pipeline di logo e hero (ottimizzazione → webp). Restituisce il percorso salvato.
+     */
+    public String uploadLandingImage(MultipartFile file) {
+        if (file == null || file.isEmpty()) throw badRequest("Seleziona un'immagine");
+        if (file.getSize() > MAX_LANDING_IMAGE_BYTES) throw badRequest("Immagine troppo grande (massimo 10 MB)");
+        if (file.getContentType() == null || !file.getContentType().startsWith("image")) {
+            throw badRequest("Il file deve essere un'immagine");
+        }
+        long idAgency = authUserProvider.getAgencyId();
+        long idUser = authUserProvider.getUserId();
+        String path = fileUtils.uploadImageWithBucket(file, idAgency, idUser, "img");
+        if (path == null || path.isBlank()) throw badRequest("Impossibile caricare l'immagine, prova con un altro file");
+        return path;
     }
 
     private static final Pattern HEX_COLOR = Pattern.compile("^#[0-9a-fA-F]{6}$");
