@@ -26,6 +26,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+// Utente ADMIN di default; i test su altri ruoli sovrascrivono con @WithMockUser a livello di metodo
+@WithMockUser(roles = "ADMIN")
 @SpringBootTest
 @AutoConfigureMockMvc
 public class IngredientControllerTest {
@@ -60,7 +62,7 @@ public class IngredientControllerTest {
 
         Mockito.when(ingredientService.addIngredient(Mockito.any())).thenReturn(output);
 
-        mockMvc.perform(post("/insert")
+        mockMvc.perform(post("/api/ingredients/insert")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(input)))
                 .andExpect(status().isOk())
@@ -87,7 +89,7 @@ public class IngredientControllerTest {
 
         Mockito.when(ingredientService.addIngredient(Mockito.any())).thenReturn(null);
 
-        mockMvc.perform(post("/insert")
+        mockMvc.perform(post("/api/ingredients/insert")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(input)))
                 .andExpect(status().isBadRequest())
@@ -120,7 +122,7 @@ public class IngredientControllerTest {
 
         Mockito.when(ingredientService.updateIngredient(Mockito.any())).thenReturn(output);
 
-        mockMvc.perform(post("/update")
+        mockMvc.perform(post("/api/ingredients/update")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(input)))
                 .andExpect(status().isOk())
@@ -143,7 +145,7 @@ public class IngredientControllerTest {
 
         Mockito.when(ingredientService.updateIngredient(Mockito.any())).thenReturn(null);
 
-        mockMvc.perform(post("/update")
+        mockMvc.perform(post("/api/ingredients/update")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(input)))
                 .andExpect(status().isBadRequest())
@@ -157,7 +159,7 @@ public class IngredientControllerTest {
         input.setId(5L);
         input.setName("Prosciutto");
 
-        mockMvc.perform(post("/update")
+        mockMvc.perform(post("/api/ingredients/update")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(input)))
                 .andExpect(status().isForbidden());
@@ -175,7 +177,7 @@ public class IngredientControllerTest {
 
         Mockito.when(ingredientService.deleteIngredient(id)).thenReturn(List.of(10L, 11L));
 
-        mockMvc.perform(get("/delete/{id}", id))
+        mockMvc.perform(get("/api/ingredients/delete/{id}", id))
                 .andExpect(status().isOk());
     }
 
@@ -186,17 +188,17 @@ public class IngredientControllerTest {
 
         Mockito.when(ingredientService.deleteIngredient(id)).thenReturn(null);
 
-        mockMvc.perform(get("/delete/{id}", id))
+        mockMvc.perform(get("/api/ingredients/delete/{id}", id))
                 .andExpect(status().isBadRequest());
     }
 
     @Test
     @WithMockUser(roles = "ADMIN")
-    void deleteIngredient_invalidId_throwsException() throws Exception {
+    void deleteIngredient_invalidId_returns400() throws Exception {
         long invalidId = -1L;
 
-        mockMvc.perform(get("/delete/{id}", invalidId))
-                .andExpect(status().isInternalServerError());
+        mockMvc.perform(get("/api/ingredients/delete/{id}", invalidId))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -204,7 +206,7 @@ public class IngredientControllerTest {
     void deleteIngredient_withNonAdminRole_returnsForbidden() throws Exception {
         long id = 1L;
 
-        mockMvc.perform(get("/delete/{id}", id))
+        mockMvc.perform(get("/api/ingredients/delete/{id}", id))
                 .andExpect(status().isForbidden());
     }
 
@@ -230,19 +232,19 @@ public class IngredientControllerTest {
 
         Mockito.when(ingredientService.setAddable(idIngredient, addable)).thenReturn(400);
 
-        mockMvc.perform(get("/setAddable/{idIngredient}/{addable}", idIngredient, addable))
+        mockMvc.perform(get("/api/ingredients/setAddable/{idIngredient}/{addable}", idIngredient, addable))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().string("Errore"));
     }
 
     @Test
     @WithMockUser(roles = "ADMIN")
-    void setAddable_invalidId_throwsException() throws Exception {
+    void setAddable_invalidId_returns400() throws Exception {
         long invalidId = 0L;
         boolean addable = true;
 
-        mockMvc.perform(get("/setAddable/{idIngredient}/{addable}", invalidId, addable))
-                .andExpect(status().isInternalServerError());
+        mockMvc.perform(get("/api/ingredients/setAddable/{idIngredient}/{addable}", invalidId, addable))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -251,7 +253,7 @@ public class IngredientControllerTest {
         long idIngredient = 1L;
         boolean addable = true;
 
-        mockMvc.perform(get("/setAddable/{idIngredient}/{addable}", idIngredient, addable))
+        mockMvc.perform(get("/api/ingredients/setAddable/{idIngredient}/{addable}", idIngredient, addable))
                 .andExpect(status().isForbidden());
     }
 
@@ -278,7 +280,7 @@ public class IngredientControllerTest {
 
         Mockito.when(ingredientService.setAvailable(idIngredient, available)).thenReturn(200);
 
-        mockMvc.perform(get("/setAvailable/{idIngredient}/{available}", idIngredient, available))
+        mockMvc.perform(get("/api/ingredients/setAvailable/{idIngredient}/{available}", idIngredient, available))
                 .andExpect(status().isOk())
                 .andExpect(content().string("OK"));
     }
@@ -290,18 +292,18 @@ public class IngredientControllerTest {
 
         Mockito.when(ingredientService.setAvailable(idIngredient, available)).thenReturn(400);
 
-        mockMvc.perform(get("/setAvailable/{idIngredient}/{available}", idIngredient, available))
+        mockMvc.perform(get("/api/ingredients/setAvailable/{idIngredient}/{available}", idIngredient, available))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().string("Errore"));
     }
     @Test
     @WithMockUser(roles = "ADMIN")
-    void setAvailable_invalidId_throwsException() throws Exception {
+    void setAvailable_invalidId_returns400() throws Exception {
         long invalidId = 0L;
         boolean available = true;
 
-        mockMvc.perform(get("/setAvailable/{idIngredient}/{available}", invalidId, available))
-                .andExpect(status().isInternalServerError());
+        mockMvc.perform(get("/api/ingredients/setAvailable/{idIngredient}/{available}", invalidId, available))
+                .andExpect(status().isBadRequest());
     }
     @Test
     @WithMockUser(roles = "USER")
@@ -309,7 +311,7 @@ public class IngredientControllerTest {
         long idIngredient = 1L;
         boolean available = true;
 
-        mockMvc.perform(get("/setAvailable/{idIngredient}/{available}", idIngredient, available))
+        mockMvc.perform(get("/api/ingredients/setAvailable/{idIngredient}/{available}", idIngredient, available))
                 .andExpect(status().isForbidden());
     }
 

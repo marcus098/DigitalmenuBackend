@@ -145,7 +145,8 @@ class CardServiceCheckoutTest {
     @Test
     void secondVisitSameDayNotCountedWhenOneVisitPerDay() {
         CardJpa c = card(false, 2, 10, 0);
-        c.setLastVisitAt(OffsetDateTime.now().minusMinutes(30));
+        // Inizio della giornata di business (deterministico anche a ridosso di mezzanotte)
+        c.setLastVisitAt(java.time.LocalDate.now(CardService.BUSINESS_ZONE).atStartOfDay(CardService.BUSINESS_ZONE).toOffsetDateTime());
         settings(null, 10).setOneVisitPerDay(true);
 
         CardService.CheckoutLoyalty r = checkout(2000, 0, false, true);

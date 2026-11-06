@@ -22,6 +22,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.test.context.support.WithAnonymousUser;
 
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -35,6 +36,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+// Utente ADMIN di default (come un admin autenticato); i test senza auth usano @WithAnonymousUser
+@WithMockUser(roles = "ADMIN")
 @SpringBootTest
 @AutoConfigureMockMvc
 public class CategoryControllerTest {
@@ -82,9 +85,11 @@ public class CategoryControllerTest {
         ).andExpect(status().isOk());
     }
 
-    // Caso senza autenticazione - token mancante
+    // Caso senza autenticazione - token mancante.
+    // NB: SecurityConf non ha un authenticationEntryPoint, quindi gli anonimi ricevono 403 (non 401)
     @Test
-    void addCategory_WithoutAuth_ShouldReturn401() throws Exception {
+    @WithAnonymousUser
+    void addCategory_WithoutAuth_ShouldReturn403() throws Exception {
         MockMultipartFile file = new MockMultipartFile("file", "test.jpg", MediaType.TEXT_PLAIN_VALUE, "test data".getBytes());
         mockMvc.perform(multipart("/api/categories/addCategory")
                 .file(file)
@@ -94,7 +99,7 @@ public class CategoryControllerTest {
                 .param("products", "1")
                 .param("products", "2")
                 .contentType(MediaType.MULTIPART_FORM_DATA)
-        ).andExpect(status().isUnauthorized());
+        ).andExpect(status().isForbidden());
     }
 
     // Caso con ruolo diverso da ADMIN (ad es. USER)
@@ -125,7 +130,7 @@ public class CategoryControllerTest {
         // Simula il comportamento del service
         Mockito.when(categoryService.deleteCategory(categoryId)).thenReturn(200);
 
-        mockMvc.perform(get("/deleteCategory/{id}", categoryId))
+        mockMvc.perform(get("/api/categories/deleteCategory/{id}", categoryId))
                 .andExpect(status().isOk())
                 .andExpect(content().string("Category deleted successfully"));
     }
@@ -137,7 +142,7 @@ public class CategoryControllerTest {
         // Simula fallimento (es. ritorna 400)
         Mockito.when(categoryService.deleteCategory(categoryId)).thenReturn(400);
 
-        mockMvc.perform(get("/deleteCategory/{id}", categoryId))
+        mockMvc.perform(get("/api/categories/deleteCategory/{id}", categoryId))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().string("Category deletion failed"));
     }
@@ -150,7 +155,7 @@ public class CategoryControllerTest {
         Mockito.when(categoryService.deleteCategory(categoryId))
                 .thenThrow(new RuntimeException("DB error"));
 
-        mockMvc.perform(get("/deleteCategory/{id}", categoryId))
+        mockMvc.perform(get("/api/categories/deleteCategory/{id}", categoryId))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().string("Category deletion failed"));
     }
@@ -163,7 +168,7 @@ public class CategoryControllerTest {
 
     @Test
     void updateCategory_success_withoutFile() throws Exception {
-        MockHttpServletRequestBuilder request = multipart("/updateCategory")
+        MockHttpServletRequestBuilder request = multipart("/api/categories/updateCategory")
                 .param("id", "1")
                 .param("name", "Test Category")
                 .param("description", "Some description")
@@ -183,7 +188,7 @@ public class CategoryControllerTest {
     void updateCategory_success_withFile() throws Exception {
         MockMultipartFile file = new MockMultipartFile("file", "image.png", "image/png", "dummy-image-data".getBytes());
 
-        MockHttpServletRequestBuilder request = multipart("/updateCategory")
+        MockHttpServletRequestBuilder request = multipart("/api/categories/updateCategory")
                 .file(file)
                 .param("id", "2")
                 .param("name", "Updated Category")
@@ -203,7 +208,7 @@ public class CategoryControllerTest {
     @Test
     void updateCategory_invalidModel() throws Exception {
         // Non passo i parametri necessari: simulate validate() == false
-        MockHttpServletRequestBuilder request = multipart("/updateCategory")
+        MockHttpServletRequestBuilder request = multipart("/api/categories/updateCategory")
                 .with(req -> { req.setMethod("POST"); return req; });
 
         mockMvc.perform(request)
@@ -213,7 +218,7 @@ public class CategoryControllerTest {
     // Caso: eccezione da service
     @Test
     void updateCategory_serviceThrowsException() throws Exception {
-        MockHttpServletRequestBuilder request = multipart("/updateCategory")
+        MockHttpServletRequestBuilder request = multipart("/api/categories/updateCategory")
                 .param("id", "3")
                 .param("name", "Category with issue")
                 .param("description", "desc")
@@ -234,6 +239,7 @@ public class CategoryControllerTest {
 
 
     /******* INIZIO TEST changeOrder *******/
+    @Test
     void changeOrder_success() throws Exception {
         String json = """
             {
@@ -247,7 +253,7 @@ public class CategoryControllerTest {
         Mockito.when(categoryService.changeOrder(Mockito.anyList()))
                 .thenReturn(200);
 
-        mockMvc.perform(post("/changeOrder")
+        mockMvc.perform(post("/api/categories/changeOrder")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json))
                 .andExpect(status().isOk())
@@ -263,7 +269,7 @@ public class CategoryControllerTest {
             }
         """;
 
-        mockMvc.perform(post("/changeOrder")
+        mockMvc.perform(post("/api/categories/changeOrder")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json))
                 .andExpect(status().isBadRequest());
@@ -283,7 +289,7 @@ public class CategoryControllerTest {
         Mockito.when(categoryService.changeOrder(Mockito.anyList()))
                 .thenThrow(new RuntimeException("Internal error"));
 
-        mockMvc.perform(post("/changeOrder")
+        mockMvc.perform(post("/api/categories/changeOrder")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json))
                 .andExpect(status().isBadRequest())
@@ -299,7 +305,7 @@ public class CategoryControllerTest {
         Mockito.when(categoryService.setAvailable(1L, true))
                 .thenReturn(200);
 
-        mockMvc.perform(get("/setAvailable/1/true"))
+        mockMvc.perform(get("/api/categories/setAvailable/1/true"))
                 .andExpect(status().isOk())
                 .andExpect(content().string("OK"));
     }
@@ -307,19 +313,19 @@ public class CategoryControllerTest {
     // idCategory <= 0 => ritorna 403 con messaggio
     @Test
     void setAvailable_invalidId_returns403() throws Exception {
-        mockMvc.perform(get("/setAvailable/0/true"))
+        mockMvc.perform(get("/api/categories/setAvailable/0/true"))
                 .andExpect(status().isForbidden())
                 .andExpect(content().string("Data not valid"));
     }
 
-    // Service ritorna status != 200
+    // Service ritorna status != 200: il controller lo propaga così com' è (qui 500) con body "Errore"
     @Test
-    void setAvailable_serviceFails_returnsErrore() throws Exception {
+    void setAvailable_serviceFails_propagatesStatusWithErrore() throws Exception {
         Mockito.when(categoryService.setAvailable(1L, false))
                 .thenReturn(500);
 
-        mockMvc.perform(get("/setAvailable/1/false"))
-                .andExpect(status().isBadRequest())
+        mockMvc.perform(get("/api/categories/setAvailable/1/false"))
+                .andExpect(status().isInternalServerError())
                 .andExpect(content().string("Errore"));
     }
 
@@ -329,7 +335,7 @@ public class CategoryControllerTest {
         Mockito.when(categoryService.setAvailable(1L, true))
                 .thenThrow(new RuntimeException("boom"));
 
-        mockMvc.perform(get("/setAvailable/1/true"))
+        mockMvc.perform(get("/api/categories/setAvailable/1/true"))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().string("Errore"));
     }
