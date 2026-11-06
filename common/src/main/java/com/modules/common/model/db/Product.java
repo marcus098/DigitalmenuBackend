@@ -23,6 +23,8 @@ public abstract class Product {
     protected OffsetDateTime createdAt;
     protected OffsetDateTime deletedAt;
     protected int positionProgressive;
+    // Gruppi di varianti oltre al formato (JSON, null = nessuno). Vedi docs/VARIANTI_PRODOTTO.md
+    protected String variantGroups;
 
     public Product() {
     }
@@ -134,6 +136,14 @@ public abstract class Product {
 
     public void setTraces(String traces) {
         this.traces = traces;
+    }
+
+    public String getVariantGroups() {
+        return variantGroups;
+    }
+
+    public void setVariantGroups(String variantGroups) {
+        this.variantGroups = variantGroups;
     }
 
     public String getTags() {

@@ -5,6 +5,7 @@ import com.modules.common.finders.ProductUtils;
 import com.modules.common.logs.errorlog.ErrorLog;
 import com.modules.common.mapper.ProductMapper;
 import com.modules.common.model.EntityLog;
+import com.modules.common.model.variant.VariantGroups;
 import com.modules.common.utilities.Utilities;
 import com.modules.productmodule.model.ProductJpa;
 import com.modules.productmodule.repository.mongo.MongoProductRepository;
@@ -101,6 +102,8 @@ public class ProductUtilsImpl implements ProductUtils {
                     );
                     // Le tracce non sono nel costruttore: senza questo il salvataggio le azzererebbe
                     product.setTraces(utilities.convertIntListToString(p.getTraces()));
+                    // Idem per i gruppi di varianti
+                    product.setVariantGroups(VariantGroups.toJson(p.getVariantGroups()));
                     return product;
                 })
                 .collect(Collectors.toList());

@@ -14,7 +14,8 @@ import java.util.regex.Pattern;
  * Renderer puro (nessuna dipendenza Spring) della comanda in righe di testo.
  *
  * Ogni riga ha un prefisso di stile di 2 caratteri, interpretato dagli encoder:
- *   "N|" normale, "B|" grassetto, "C|" grassetto centrato, "H|" grande (doppia altezza/larghezza) centrato.
+ *   "N|" normale, "B|" grassetto, "C|" grassetto centrato, "H|" grande (doppia altezza/larghezza) centrato,
+ *   "I|" in evidenza (grassetto in negativo: bianco su nero), usato per le varianti highlight (es. senza glutine).
  * Le righe "H|" sono già spezzate a width/2 caratteri.
  *
  * Il testo è solo ASCII stampabile: gli accenti vengono traslitterati (à → a', é → e', € → EUR) così
@@ -26,6 +27,9 @@ public final class TicketRenderer {
     public static final String BOLD = "B|";
     public static final String CENTER = "C|";
     public static final String HUGE = "H|";
+    public static final String INVERTED = "I|";
+    /** Prefisso delle varianti in evidenza: "/!\" è il segnale di pericolo in ASCII (il simbolo ⚠ non è stampabile). */
+    public static final String HIGHLIGHT_MARK = "/!\\ ";
 
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
     private static final DateTimeFormatter HHMM = DateTimeFormatter.ofPattern("HH:mm");
@@ -93,6 +97,18 @@ public final class TicketRenderer {
                 String option = sanitize(item.option());
                 if (!option.isEmpty()) name += " (" + option + ")";
                 add(out, BOLD, wrap(qty + name, width, 0, qty.length()));
+                if (item.variants() != null) for (TicketData.Variant v : item.variants()) {
+                    if (v == null) continue;
+                    String choice = sanitize(v.choice());
+                    if (choice.isEmpty()) continue;
+                    if (v.highlight()) {
+                        // In evidenza: riga a sé, maiuscolo, in negativo (es. "/!\ SENZA GLUTINE")
+                        add(out, INVERTED, wrap(HIGHLIGHT_MARK + choice.toUpperCase(), width, 3, 7));
+                    } else {
+                        String groupName = sanitize(v.group());
+                        add(out, NORMAL, wrap("> " + (groupName.isEmpty() ? "" : groupName + ": ") + choice, width, 3, 5));
+                    }
+                }
                 if (item.minus() != null) for (String m : item.minus()) {
                     String s = sanitize(m);
                     if (!s.isEmpty()) add(out, NORMAL, wrap("- senza " + s, width, 3, 5));

@@ -72,6 +72,10 @@ public class TicketFactory {
                             p.getQuantity(),
                             p.getProductName(),
                             p.getProductOption() != null ? p.getProductOption().getName() : null,
+                            p.getSelectedVariants() == null ? List.of() : p.getSelectedVariants().stream()
+                                    .filter(v -> v != null)
+                                    .map(v -> new TicketData.Variant(v.getGroupName(), v.getChoiceName(), v.isHighlight()))
+                                    .toList(),
                             p.getIngredientsMinus() == null ? List.of() : p.getIngredientsMinus().stream().map(i -> i.getName()).toList(),
                             p.getIngredientsPlus() == null ? List.of() : p.getIngredientsPlus().stream().map(i -> i.getName()).toList(),
                             p.getNote()));

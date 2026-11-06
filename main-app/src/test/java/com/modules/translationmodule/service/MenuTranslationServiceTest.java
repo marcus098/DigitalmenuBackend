@@ -33,6 +33,7 @@ class MenuTranslationServiceTest {
     private OllamaClient ollama;
     private MenuTranslationService service;
     private final List<MenuTranslationJpa> stored = new ArrayList<>();
+    private ProductJpa diavola;
 
     @BeforeEach
     void setUp() {
@@ -59,7 +60,7 @@ class MenuTranslationServiceTest {
         when(pizze.getId()).thenReturn(1L);
         when(pizze.getName()).thenReturn("Pizze");
         when(categories.findAllByIdAgencyAndDeletedOrderByPositionProgressive(AGENCY, false)).thenReturn(List.of(pizze));
-        ProductJpa diavola = mock(ProductJpa.class);
+        diavola = mock(ProductJpa.class);
         when(diavola.getId()).thenReturn(10L);
         when(diavola.getName()).thenReturn("Diavola");
         when(diavola.getDescription()).thenReturn("Pomodoro, mozzarella e salame piccante");
@@ -156,4 +157,46 @@ class MenuTranslationServiceTest {
     void settingsRejectUnsupportedLanguage() {
         assertThrows(IllegalArgumentException.class, () -> service.updateSettings(AGENCY, List.of("en", "klingon"), false));
     }
+
+    @Test
+    void variantGroupAndChoiceNamesAreTranslatableAndServed() {
+        when(diavola.getVariantGroups()).thenReturn(
+                "[{\"id\":\"impasto\",\"name\":\"Impasto\",\"choices\":["
+                        + "{\"id\":\"classico\",\"name\":\"Classico\",\"isDefault\":true},"
+                        + "{\"id\":\"senza-glutine\",\"name\":\"Senza glutine\"}]}]");
+
+        List<MenuTranslationService.Row> rows = service.rows(AGENCY, "en");
+        assertTrue(rows.stream().anyMatch(r -> r.type().equals("VARIANT") && r.id() == 10 && r.field().equals("impasto")
+                && r.source().equals("Impasto")));
+        assertTrue(rows.stream().anyMatch(r -> r.type().equals("VARIANT") && r.field().equals("impasto/senza-glutine")
+                && r.source().equals("Senza glutine")));
+
+        // correzione manuale di una scelta e menu pubblico
+        when(translations.findByIdAgencyAndEntityTypeAndEntityIdAndLangAndField(AGENCY, "VARIANT", 10L, "en", "impasto/senza-glutine"))
+                .thenReturn(Optional.empty());
+        when(translations.save(any())).thenAnswer(inv -> { stored.add(inv.getArgument(0)); return inv.getArgument(0); });
+        MenuTranslationService.Row saved = service.saveManual(AGENCY, "en", "VARIANT", 10, "impasto/senza-glutine", "Gluten free");
+        assertEquals("OK", saved.status());
+        stored(EntityType.VARIANT, 10, "impasto", "Dough", "Impasto");
+
+        AgencyRepository agencies = mock(AgencyRepository.class);
+        com.modules.authmodule.model.AgencyJpa agency = mock(com.modules.authmodule.model.AgencyJpa.class);
+        when(agency.getId()).thenReturn(AGENCY);
+        when(agencies.findByNameAndDeleted("dapeppe", false)).thenReturn(Optional.of(agency));
+        ReflectionTestUtils.setField(service, "agencyRepository", agencies);
+        Map<Long, Map<String, String>> variants = service.publicMenu("dapeppe", "en").texts().get("VARIANT");
+        assertEquals("Dough", variants.get(10L).get("impasto"));
+        assertEquals("Gluten free", variants.get(10L).get("impasto/senza-glutine"));
+        // i testi delle varianti arrivano al modello con kind "option"
+        assertEquals("option", MenuTranslationService.items(List.of(new MenuTranslationService.Source(
+                new TranslationKey(EntityType.VARIANT, 10, "impasto"), "Impasto"))).get(0).kind());
+    }
+
+    private void stored(EntityType type, long id, String field, String text, String sourceText) {
+        MenuTranslationJpa t = new MenuTranslationJpa(AGENCY, new TranslationKey(type, id, field), "en");
+        t.setText(text);
+        t.setSourceHash(MenuTranslationService.hash(sourceText));
+        stored.add(t);
+    }
+
 }

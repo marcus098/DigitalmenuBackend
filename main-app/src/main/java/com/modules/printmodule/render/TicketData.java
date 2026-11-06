@@ -19,7 +19,14 @@ public record TicketData(
 ) {
     public enum OrderKind { TABLE, TAKE_AWAY, HOME }
 
+    /** variants: una riga ciascuna sotto il prodotto; highlight = in evidenza (es. senza glutine). */
     public record Item(String category, int quantity, String name, String option,
-                       List<String> minus, List<String> plus, String note) {
+                       List<Variant> variants, List<String> minus, List<String> plus, String note) {
+        public Item(String category, int quantity, String name, String option,
+                    List<String> minus, List<String> plus, String note) {
+            this(category, quantity, name, option, List.of(), minus, plus, note);
+        }
     }
+
+    public record Variant(String group, String choice, boolean highlight) {}
 }

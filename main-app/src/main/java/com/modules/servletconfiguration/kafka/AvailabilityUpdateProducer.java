@@ -18,6 +18,8 @@ public class AvailabilityUpdateProducer {
 
     public enum Kind { PRODUCT, CATEGORY, INGREDIENT }
 
+    private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
+
     private final KafkaTemplate<String, String> kafkaTemplate;
 
     public AvailabilityUpdateProducer(KafkaTemplate<String, String> kafkaTemplate) {
@@ -26,7 +28,33 @@ public class AvailabilityUpdateProducer {
 
     /** Inviato dopo il commit: chi riceve l'evento non deve poter leggere il valore vecchio. */
     public void send(long idAgency, Kind kind, long id, boolean available) {
-        String json = "{\"idAgency\":" + idAgency + ",\"kind\":\"" + kind.name() + "\",\"id\":" + id + ",\"available\":" + available + "}";
+        publish(idAgency, kind, id, "{\"idAgency\":" + idAgency + ",\"kind\":\"" + kind.name() + "\",\"id\":" + id + ",\"available\":" + available + "}");
+    }
+
+    /**
+     * Scelta di un gruppo di varianti esaurita/ripristinata: stesso evento PRODUCT (available = disponibilità del
+     * prodotto, invariata) con in più groupId, choiceId e choiceAvailable.
+     */
+    public void sendVariant(long idAgency, long idProduct, boolean productAvailable, String groupId, String choiceId, boolean choiceAvailable) {
+        java.util.Map<String, Object> event = new java.util.LinkedHashMap<>();
+        event.put("idAgency", idAgency);
+        event.put("kind", Kind.PRODUCT.name());
+        event.put("id", idProduct);
+        event.put("available", productAvailable);
+        event.put("groupId", groupId);
+        event.put("choiceId", choiceId);
+        event.put("choiceAvailable", choiceAvailable);
+        String json;
+        try {
+            json = MAPPER.writeValueAsString(event);
+        } catch (Exception e) {
+            ErrorLog.logger.warn("Evento disponibilità variante non serializzato: {}", e.getMessage());
+            return;
+        }
+        publish(idAgency, Kind.PRODUCT, idProduct, json);
+    }
+
+    private void publish(long idAgency, Kind kind, long id, String json) {
         Runnable task = () -> {
             try {
                 kafkaTemplate.send(TOPIC, Long.toString(idAgency), json);

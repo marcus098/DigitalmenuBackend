@@ -50,7 +50,7 @@ public class MenuTranslator {
                 - Keep protected Italian products and brand names in Italian (e.g. Parmigiano Reggiano, Mozzarella di bufala campana DOP, Prosciutto di Parma, Aperol).
                 - Keep numbers, units, prices, symbols and emoji unchanged.
                 - Translate only: no explanations, notes, quotes or alternatives.
-                - "kind" tells what the text is: category, dish, description or ingredient.
+                - "kind" tells what the text is: category, dish, description, ingredient or option (a choice or choice group of a dish, e.g. size, dough or "Senza glutine").
                 Reply only with JSON in the form {"items":[{"k":"<same key>","t":"<translation>"}]} containing every key you received.
                 """.formatted(lang.englishName());
     }

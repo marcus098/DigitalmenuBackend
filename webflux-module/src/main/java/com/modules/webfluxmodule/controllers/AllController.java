@@ -112,9 +112,11 @@ public class AllController {
     }
 
     @GetMapping("/public/client/getAll/{localname}")
-    public Mono<ListToExport> getAllClient(@PathVariable("localname") String localname) {
+    public Mono<ListToExport> getAllClient(@PathVariable("localname") String localname,
+                                           @RequestParam(value = "lang", required = false) String lang) {
         System.out.println(localname);
-        return allService.getAll(Mono.empty(), -1L, localname, false);
+        // ?lang=en: nomi di gruppi e scelte delle varianti già tradotti (il resto lo traduce il client)
+        return allService.getAll(Mono.empty(), -1L, localname, false, lang);
     }
 
     // Endpoint pubblici: restituiscono una vista REDATTA della comanda (niente nome/telefono/indirizzo/clientSessionId)

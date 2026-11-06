@@ -123,6 +123,13 @@ public class AggregatingKafkaConsumer {
             projected.put("kind", event.get("kind"));
             projected.put("id", event.get("id"));
             projected.put("available", event.get("available"));
+            // Scelta di un gruppo di varianti (kind PRODUCT): {groupId, choiceId, choiceAvailable}
+            if (event.get("groupId") instanceof String g && event.get("choiceId") instanceof String c
+                    && event.get("choiceAvailable") instanceof Boolean ca) {
+                projected.put("groupId", g);
+                projected.put("choiceId", c);
+                projected.put("choiceAvailable", ca);
+            }
             byAgency.computeIfAbsent(agency.longValue(), k -> new ArrayList<>()).add(projected);
         }
         byAgency.forEach((agencyId, events) -> {

@@ -3,6 +3,7 @@ package com.modules.common.dto;
 import com.fasterxml.jackson.annotation.JsonView;
 import com.modules.common.model.OptionInProduct;
 import com.modules.common.model.db.Product;
+import com.modules.common.model.variant.VariantGroup;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -22,6 +23,8 @@ public class ProductDto {
     private List<Integer> traces = new ArrayList<>();
     private List<Long> ingredients;
     private boolean available;
+    // Gruppi di varianti oltre al formato (mai null). Vedi docs/VARIANTI_PRODOTTO.md
+    private List<VariantGroup> variantGroups = new ArrayList<>();
     private int position_progressive;
     @JsonView(Views.Updating.class)
     private String sessionUpdating;
@@ -88,6 +91,14 @@ public class ProductDto {
         this.position_progressive = position_progressive;
         this.sessionUpdating = sessionUpdating;
         this.changeType = changeType;
+    }
+
+    public List<VariantGroup> getVariantGroups() {
+        return variantGroups;
+    }
+
+    public void setVariantGroups(List<VariantGroup> variantGroups) {
+        this.variantGroups = variantGroups == null ? new ArrayList<>() : variantGroups;
     }
 
     public String getChangeType() {
@@ -216,6 +227,7 @@ public class ProductDto {
                 ", traces=" + traces +
                 ", ingredients=" + ingredients +
                 ", available=" + available +
+                ", variantGroups=" + variantGroups +
                 ", position_progressive=" + position_progressive +
                 ", sessionUpdating='" + sessionUpdating + '\'' +
                 ", changeType='" + changeType + '\'' +

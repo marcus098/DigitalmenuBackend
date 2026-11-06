@@ -1,5 +1,7 @@
 package com.modules.ordermodule.request;
 
+import com.modules.common.model.variant.VariantSelection;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -10,6 +12,8 @@ public class AddProductToOrder {
     private List<Long> ingredientsMinus = new ArrayList<>();
     private List<Long> ingredientsPlus = new ArrayList<>();
     private String note;
+    /** Una scelta per gruppo di varianti; i gruppi omessi prendono la scelta predefinita. */
+    private List<VariantSelection> variants = new ArrayList<>();
 
     public AddProductToOrder(){
 
@@ -53,6 +57,14 @@ public class AddProductToOrder {
 
     public void setIngredientsPlus(List<Long> ingredientsPlus) {
         this.ingredientsPlus = ingredientsPlus;
+    }
+
+    public List<VariantSelection> getVariants() {
+        return variants;
+    }
+
+    public void setVariants(List<VariantSelection> variants) {
+        this.variants = variants == null ? new ArrayList<>() : variants;
     }
 
     public String getNote() {

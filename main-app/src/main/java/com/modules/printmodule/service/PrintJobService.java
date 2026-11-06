@@ -134,8 +134,8 @@ public class PrintJobService {
     public enum TabletOutcome { OK, NOT_FOUND, CONFLICT, NO_CONTENT }
 
     /** escPos = concatenazione degli scontrini di tutte le stampanti tablet (copie incluse); tickets = n. stampanti coinvolte. */
-    public record TabletTicket(TabletOutcome outcome, byte[] escPos, int tickets) {
-        static TabletTicket of(TabletOutcome o) { return new TabletTicket(o, null, 0); }
+    public record TabletTicket(TabletOutcome outcome, byte[] escPos, int tickets, String text) {
+        static TabletTicket of(TabletOutcome o) { return new TabletTicket(o, null, 0, null); }
     }
 
     public List<PrinterDoc> tabletPrinters(long idAgency) {
@@ -168,17 +168,20 @@ public class PrintJobService {
         TicketFactory.ComandContext ctx = ticketFactory.context(comand);
         PrintJobKind kind = reprint ? PrintJobKind.REPRINT : PrintJobKind.NEW_ORDER;
         ByteArrayOutputStream out = new ByteArrayOutputStream();
+        StringBuilder text = new StringBuilder();
         int count = 0;
         for (PrinterDoc p : printers) {
             Optional<TicketData> ticket = ticketFactory.ticket(ctx, p, reprint ? "RISTAMPA" : null);
             if (ticket.isEmpty()) continue;
             List<String> lines = TicketRenderer.render(ticket.get(), p.charsPerLine());
             out.writeBytes(PrinterEncoder.escPos(lines, Math.max(1, p.getCopies())));
+            if (text.length() > 0) text.append('\n');
+            text.append(TicketRenderer.toPlainText(lines, p.charsPerLine()));
             recordTabletJob(p, comandId, kind, lines);
             count++;
         }
         if (count == 0) return TabletTicket.of(TabletOutcome.NO_CONTENT);
-        return new TabletTicket(TabletOutcome.OK, out.toByteArray(), count);
+        return new TabletTicket(TabletOutcome.OK, out.toByteArray(), count, text.toString());
     }
 
     /** Scontrino di prova per una stampante tablet (ESC/POS da passare a RawBT). */

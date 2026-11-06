@@ -4,6 +4,9 @@ import com.modules.authmodule.model.AgencyJpa;
 import com.modules.authmodule.repository.AgencyRepository;
 import com.modules.categorymodule.repository.CategoryRepository;
 import com.modules.common.logs.errorlog.ErrorLog;
+import com.modules.common.model.variant.VariantChoice;
+import com.modules.common.model.variant.VariantGroup;
+import com.modules.common.model.variant.VariantGroups;
 import com.modules.ingredientmodule.repository.IngredientRepository;
 import com.modules.productmodule.repository.ProductRepository;
 import com.modules.translationmodule.ai.AiUnavailableException;
@@ -85,7 +88,7 @@ public class MenuTranslationService {
     /** status: OK, STALE (testo italiano cambiato), MISSING. */
     public record Row(String type, long id, String field, String source, String translation, String status, boolean manual) {}
 
-    /** Menu pubblico: tipo → id → campo → testo. */
+    /** Menu pubblico: tipo → id → campo → testo (VARIANT: id prodotto → "gruppo" o "gruppo/scelta" → testo). */
     public record PublicMenu(String lang, Map<String, Map<Long, Map<String, String>>> texts) {}
 
     private record CachedMenu(PublicMenu menu, long at) {}
@@ -131,6 +134,15 @@ public class MenuTranslationService {
         productRepository.findAllByDeletedAndIdAgency(false, idAgency).forEach(p -> {
             add(out, EntityType.PRODUCT, p.getId(), Field.NAME, p.getName());
             add(out, EntityType.PRODUCT, p.getId(), Field.DESCRIPTION, p.getDescription());
+            // Nomi di gruppi e scelte delle varianti (VARIANT, id = prodotto, campo = gruppo o gruppo/scelta)
+            for (VariantGroup g : VariantGroups.parse(p.getVariantGroups())) {
+                if (g.getId() == null) continue;
+                add(out, EntityType.VARIANT, p.getId(), TranslationKey.variantField(g.getId(), null), g.getName());
+                for (VariantChoice c : g.getChoices()) {
+                    if (c.getId() == null) continue;
+                    add(out, EntityType.VARIANT, p.getId(), TranslationKey.variantField(g.getId(), c.getId()), c.getName());
+                }
+            }
         });
         ingredientRepository.findAllByIdAgencyAndDeletedOrderByName(idAgency, false).forEach(i ->
                 add(out, EntityType.INGREDIENT, i.getId(), Field.NAME, i.getName()));
@@ -138,7 +150,11 @@ public class MenuTranslationService {
     }
 
     private static void add(List<Source> out, EntityType type, Long id, Field field, String text) {
-        if (id == null || text == null || text.isBlank()) return;
+        add(out, type, id, field.name(), text);
+    }
+
+    private static void add(List<Source> out, EntityType type, Long id, String field, String text) {
+        if (id == null || field == null || text == null || text.isBlank()) return;
         out.add(new Source(new TranslationKey(type, id, field), text.strip()));
     }
 
@@ -183,7 +199,7 @@ public class MenuTranslationService {
         return sources(idAgency).stream().map(s -> {
             MenuTranslationJpa t = ex.get(s.key());
             String status = t == null ? "MISSING" : hash(s.text()).equals(t.getSourceHash()) ? "OK" : "STALE";
-            return new Row(s.key().type().name(), s.key().id(), s.key().field().name(), s.text(),
+            return new Row(s.key().type().name(), s.key().id(), s.key().field(), s.text(),
                     t == null ? null : t.getText(), status, t != null && t.isManual());
         }).toList();
     }
@@ -193,14 +209,18 @@ public class MenuTranslationService {
         requireLanguage(lang);
         TranslationKey key;
         try {
-            key = new TranslationKey(EntityType.valueOf(type), id, Field.valueOf(field));
+            EntityType entityType = EntityType.valueOf(type);
+            if (field == null || field.isBlank()) throw new IllegalArgumentException();
+            key = entityType == EntityType.VARIANT
+                    ? new TranslationKey(entityType, id, field)
+                    : new TranslationKey(entityType, id, Field.valueOf(field));
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException("Elemento non valido");
         }
         Source source = sources(idAgency).stream().filter(s -> s.key().equals(key)).findFirst()
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Elemento del menu non trovato"));
         Optional<MenuTranslationJpa> current = translationRepository.findByIdAgencyAndEntityTypeAndEntityIdAndLangAndField(
-                idAgency, key.type().name(), key.id(), lang, key.field().name());
+                idAgency, key.type().name(), key.id(), lang, key.field());
         evictPublic(idAgency);
         if (text == null || text.isBlank()) {
             current.ifPresent(translationRepository::delete);
@@ -290,9 +310,10 @@ public class MenuTranslationService {
         for (int i = 0; i < batch.size(); i++) {
             TranslationKey k = batch.get(i).key();
             String kind = switch (k.type()) {
-                case CATEGORY -> k.field() == Field.NAME ? "category" : "description";
-                case PRODUCT -> k.field() == Field.NAME ? "dish" : "description";
+                case CATEGORY -> Field.NAME.name().equals(k.field()) ? "category" : "description";
+                case PRODUCT -> Field.NAME.name().equals(k.field()) ? "dish" : "description";
                 case INGREDIENT -> "ingredient";
+                case VARIANT -> "option";
             };
             items.add(new MenuTranslator.Item(String.valueOf(i), kind, batch.get(i).text()));
         }
@@ -355,7 +376,7 @@ public class MenuTranslationService {
             if (t == null || !hash(s.text()).equals(t.getSourceHash())) continue;
             texts.computeIfAbsent(s.key().type().name(), k -> new LinkedHashMap<>())
                     .computeIfAbsent(s.key().id(), k -> new LinkedHashMap<>())
-                    .put(s.key().field().name(), t.getText());
+                    .put(s.key().field(), t.getText());
         }
         PublicMenu menu = new PublicMenu(lang, texts);
         publicCache.put(cacheKey, new CachedMenu(menu, System.currentTimeMillis()));

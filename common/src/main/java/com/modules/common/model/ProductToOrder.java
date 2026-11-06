@@ -1,5 +1,7 @@
 package com.modules.common.model;
 
+import com.modules.common.model.variant.SelectedVariant;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -13,7 +15,9 @@ public class ProductToOrder {
     private List<IngredientOrder> ingredientsMinus = new ArrayList<>();
     private List<IngredientOrderPlus> ingredientsPlus = new ArrayList<>();
     private String note;
-    /** Prezzo unitario (opzione + extra) in centesimi, calcolato server-side dal catalogo al momento dell'ordine. */
+    /** Varianti scelte (snapshot di nomi e supplementi al momento dell'ordine); vuota per prodotti senza gruppi. */
+    private List<SelectedVariant> selectedVariants = new ArrayList<>();
+    /** Prezzo unitario (opzione + varianti + extra) in centesimi, calcolato server-side dal catalogo al momento dell'ordine. */
     private Long unitPriceCents;
 
     public ProductToOrder() {}
@@ -39,6 +43,14 @@ public class ProductToOrder {
     //    this.note = addProductToOrder.getNote();
     //    this.ingredientsPlus = ingredientOrderPlus;
     //}
+
+    public List<SelectedVariant> getSelectedVariants() {
+        return selectedVariants;
+    }
+
+    public void setSelectedVariants(List<SelectedVariant> selectedVariants) {
+        this.selectedVariants = selectedVariants == null ? new ArrayList<>() : selectedVariants;
+    }
 
     public Long getUnitPriceCents() {
         return unitPriceCents;
@@ -131,6 +143,7 @@ public class ProductToOrder {
                 ", quantity=" + quantity +
                 ", ingredientsMinus=" + ingredientsMinus +
                 ", ingredientsPlus=" + ingredientsPlus +
+                ", selectedVariants=" + selectedVariants +
                 ", unitPriceCents=" + unitPriceCents +
                 '}';
     }

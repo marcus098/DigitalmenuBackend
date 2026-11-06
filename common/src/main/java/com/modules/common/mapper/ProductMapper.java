@@ -4,6 +4,7 @@ import com.modules.common.dto.CategoryDto;
 import com.modules.common.dto.ProductDto;
 import com.modules.common.model.LongInteger;
 import com.modules.common.model.db.Product;
+import com.modules.common.model.variant.VariantGroups;
 import com.modules.common.utilities.Utilities;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -33,6 +34,7 @@ public class ProductMapper {
         dto.setIngredients(utilities.convertStringToLongList(product.getIngredients()));
         dto.setTags(utilities.convertStringToIntList(product.getTags()));
         dto.setOptions(utilities.convertStringToOptionInProduct(product.getOptions()));
+        dto.setVariantGroups(VariantGroups.parse(product.getVariantGroups()));
 
         return dto;
     }

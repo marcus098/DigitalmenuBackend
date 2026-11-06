@@ -24,7 +24,8 @@ public class MenuTranslationJpa {
     private long entityId;
     @Column(length = 8)
     private String lang;
-    @Column(length = 16)
+    /** NAME / DESCRIPTION; per VARIANT l'id del gruppo ("impasto") o gruppo/scelta ("impasto/senza-glutine"). */
+    @Column(length = 128)
     private String field;
     @Column(columnDefinition = "TEXT")
     private String text;
@@ -40,12 +41,12 @@ public class MenuTranslationJpa {
         this.idAgency = idAgency;
         this.entityType = key.type().name();
         this.entityId = key.id();
-        this.field = key.field().name();
+        this.field = key.field();
         this.lang = lang;
     }
 
     public TranslationKey key() {
-        return new TranslationKey(EntityType.valueOf(entityType), entityId, Field.valueOf(field));
+        return new TranslationKey(EntityType.valueOf(entityType), entityId, field);
     }
 
     public Long getId() { return id; }
@@ -63,9 +64,21 @@ public class MenuTranslationJpa {
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(OffsetDateTime updatedAt) { this.updatedAt = updatedAt; }
 
-    public enum EntityType { CATEGORY, PRODUCT, INGREDIENT }
+    /** VARIANT: nomi di gruppi e scelte delle varianti di un prodotto (id = id prodotto). */
+    public enum EntityType { CATEGORY, PRODUCT, INGREDIENT, VARIANT }
     public enum Field { NAME, DESCRIPTION }
 
-    /** Testo del menu da tradurre. */
-    public record TranslationKey(EntityType type, long id, Field field) {}
+    /**
+     * Testo del menu da tradurre. field = nome di {@link Field} per CATEGORY/PRODUCT/INGREDIENT; per VARIANT
+     * è l'id del gruppo (nome del gruppo) oppure "idGruppo/idScelta" (nome della scelta).
+     */
+    public record TranslationKey(EntityType type, long id, String field) {
+        public TranslationKey(EntityType type, long id, Field field) {
+            this(type, id, field.name());
+        }
+
+        public static String variantField(String groupId, String choiceId) {
+            return choiceId == null ? groupId : groupId + "/" + choiceId;
+        }
+    }
 }

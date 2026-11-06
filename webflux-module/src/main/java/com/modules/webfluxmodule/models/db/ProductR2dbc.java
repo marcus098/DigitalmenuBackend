@@ -119,6 +119,16 @@ public class ProductR2dbc extends Product {
     }
 
     @Override
+    public String getVariantGroups() {
+        return super.getVariantGroups();
+    }
+
+    @Override
+    public void setVariantGroups(String variantGroups) {
+        super.setVariantGroups(variantGroups);
+    }
+
+    @Override
     public String getTags() {
         return super.getTags();
     }

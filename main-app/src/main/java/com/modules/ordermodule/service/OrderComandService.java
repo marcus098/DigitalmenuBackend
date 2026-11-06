@@ -15,6 +15,8 @@ import com.modules.common.model.enums.ComandStatus;
 import com.modules.common.model.enums.ComandWaiterType;
 import com.modules.common.model.enums.LogOperation;
 import com.modules.common.model.enums.SessionStatus;
+import com.modules.common.model.variant.SelectedVariant;
+import com.modules.common.model.variant.VariantGroups;
 import com.modules.ordermodule.event.ComandCreatedEvent;
 import com.modules.ordermodule.event.ComandStatusChangedEvent;
 import com.modules.ordermodule.exception.OrderRejectedException;
@@ -177,6 +179,10 @@ public class OrderComandService {
 
             notifyComandCreated(comand1);
             return comand1.getId();
+        } catch (OrderRejectedException e) {
+            // Payload non valido (es. variante esaurita): il messaggio arriva al cameriere
+            if (!saved) takeawaySlotService.releaseSlot(slotKey, slotProducts);
+            throw e;
         } catch (Exception e) {
             if (!saved) takeawaySlotService.releaseSlot(slotKey, slotProducts);
             ErrorLog.logger.error("Errore aggiunta ordine da waiter", e);
@@ -291,8 +297,16 @@ public class OrderComandService {
                     }
                 }
                 pto.setProductOption(chosenOpt);
-                // Snapshot del prezzo unitario (opzione + extra) dal catalogo.
-                pto.setUnitPriceCents(computeUnitPriceCents(chosenOpt, ingredientsPlus));
+                // Varianti (impasto, mozzarella, ...) risolte sui gruppi del DB: gruppi omessi = scelta predefinita
+                List<SelectedVariant> variants;
+                try {
+                    variants = VariantGroups.resolve(product.getName(), product.getVariantGroups(), prod.getVariants());
+                } catch (IllegalArgumentException e) {
+                    throw new OrderRejectedException(400, e.getMessage());
+                }
+                pto.setSelectedVariants(variants);
+                // Snapshot del prezzo unitario (formato + varianti + extra) dal catalogo.
+                pto.setUnitPriceCents(VariantGroups.unitPriceCents(chosenOpt, variants, ingredientsPlus));
 
                 return pto;
             }).collect(Collectors.toList());
@@ -715,7 +729,7 @@ public class OrderComandService {
             for (ProductToOrder p : order.getProducts()) {
                 if (p == null) continue;
                 Long unit = p.getUnitPriceCents();
-                if (unit == null) unit = computeUnitPriceCents(p.getProductOption(), p.getIngredientsPlus());
+                if (unit == null) unit = VariantGroups.unitPriceCents(p.getProductOption(), p.getSelectedVariants(), p.getIngredientsPlus());
                 total += unit * Math.max(0, p.getQuantity());
             }
         }
@@ -723,20 +737,6 @@ public class OrderComandService {
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
-
-    private static long computeUnitPriceCents(OptionInProduct option, List<IngredientOrderPlus> extras) {
-        long cents = option != null ? toCents(option.getPrice()) : 0;
-        if (extras != null) {
-            for (IngredientOrderPlus e : extras) {
-                if (e != null) cents += toCents(e.getPrice());
-            }
-        }
-        return cents;
-    }
-
-    private static long toCents(double price) {
-        return Math.max(0, Math.round(price * 100));
-    }
 
     private static int countProducts(List<Order> orders) {
         if (orders == null) return 0;

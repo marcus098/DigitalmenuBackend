@@ -38,7 +38,12 @@ public class OrderController {
         if (!addComandWaiter.validate()){
             return ResponseEntity.status(400).body("Payload error");
         }
-        String newId = orderComandService.addOrderWaiter(addComandWaiter);
+        String newId;
+        try {
+            newId = orderComandService.addOrderWaiter(addComandWaiter);
+        } catch (OrderRejectedException e) {
+            return ResponseEntity.status(e.getStatus()).body(Map.of("message", e.getMessage()));
+        }
         return ResponseEntity.status(newId == null ? 400 : 200).body(newId);
     }
 

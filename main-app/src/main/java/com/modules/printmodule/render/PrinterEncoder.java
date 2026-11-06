@@ -41,6 +41,11 @@ public final class PrinterEncoder {
                         out.writeBytes(text); out.write(LF);
                         out.writeBytes(new byte[]{ESC, 'E', 0});
                     }
+                    case TicketRenderer.INVERTED -> {          // GS B 1 = stampa in negativo
+                        out.writeBytes(new byte[]{GS, 'B', 1, ESC, 'E', 1});
+                        out.writeBytes(text); out.write(LF);
+                        out.writeBytes(new byte[]{ESC, 'E', 0, GS, 'B', 0});
+                    }
                     default -> { out.writeBytes(text); out.write(LF); }
                 }
             }
@@ -73,6 +78,11 @@ public final class PrinterEncoder {
                         out.writeBytes(new byte[]{ESC, 'E'});
                         out.writeBytes(text); out.write(LF);
                         out.writeBytes(new byte[]{ESC, 'F'});
+                    }
+                    case TicketRenderer.INVERTED -> {          // ESC 4 / ESC 5 = negativo (bianco su nero) on/off
+                        out.writeBytes(new byte[]{ESC, '4', ESC, 'E'});
+                        out.writeBytes(text); out.write(LF);
+                        out.writeBytes(new byte[]{ESC, 'F', ESC, '5'});
                     }
                     default -> { out.writeBytes(text); out.write(LF); }
                 }

@@ -55,7 +55,9 @@ public class TabletPrintController {
             case NO_CONTENT -> ResponseEntity.noContent().build();
             case OK -> ResponseEntity.ok(Map.of(
                     "escposBase64", Base64.getEncoder().encodeToString(t.escPos()),
-                    "tickets", t.tickets()));
+                    "tickets", t.tickets(),
+                    // Anteprima testuale (stesse righe dello scontrino, varianti incluse): utile per mostrarlo a video
+                    "text", t.text()));
         };
     }
 

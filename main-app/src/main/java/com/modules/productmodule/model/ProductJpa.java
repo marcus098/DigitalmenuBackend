@@ -138,6 +138,18 @@ public class ProductJpa extends Product {
         super.setTraces(traces);
     }
 
+    // Colonna nullable (JSON dei gruppi di varianti): null = nessun gruppo
+    @Column(name = "variant_groups", columnDefinition = "text")
+    @Override
+    public String getVariantGroups() {
+        return super.getVariantGroups();
+    }
+
+    @Override
+    public void setVariantGroups(String variantGroups) {
+        super.setVariantGroups(variantGroups);
+    }
+
     @Override
     public String getTags() {
         return super.getTags();

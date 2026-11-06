@@ -1,5 +1,7 @@
 package com.modules.ordermodule.service;
 
+import com.modules.ordermodule.exception.OrderRejectedException;
+
 import com.modules.authmodule.repository.UserRepository;
 import com.modules.common.dto.TableDto;
 import com.modules.common.finders.TableUtils;
@@ -228,6 +230,17 @@ public class TableSessionService {
 
             TableSessionJpa.SessionClient sc = findClient(session, clientSessionId);
             if (sc == null) return errorResp(403, "NOT_JOINED");
+            // Bozza verificata subito sul catalogo (prodotti, ingredienti, varianti esaurite): l'errore arriva al
+            // cliente ora, invece di far saltare in silenzio la sua comanda all'invio del tavolo
+            if (draftOrder != null && !draftOrder.isEmpty()) {
+                try {
+                    orderComandService.orderList(session.getIdAgency(), 0L, draftOrder, "draft-check");
+                } catch (OrderRejectedException e) {
+                    Map<String, Object> err = errorResp(e.getStatus(), "INVALID_ORDER");
+                    err.put("message", e.getMessage());
+                    return err;
+                }
+            }
             sc.setDraftOrder(draftOrder == null ? new ArrayList<>() : draftOrder);
             sc.setReady(true);
             sc.setLastReadyAt(OffsetDateTime.now());
