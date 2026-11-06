@@ -19,6 +19,7 @@ import com.modules.ordermodule.event.ComandCreatedEvent;
 import com.modules.ordermodule.event.ComandStatusChangedEvent;
 import com.modules.ordermodule.exception.OrderRejectedException;
 import com.modules.ordermodule.kafka.OrderUpdateProducer;
+import com.modules.ordermodule.kafka.TableSessionUpdateProducer;
 import com.modules.ordermodule.model.ComandFromWaiterJpa;
 import com.modules.ordermodule.model.ComandJpa;
 import com.modules.ordermodule.model.TableSessionJpa;
@@ -78,6 +79,9 @@ public class OrderComandService {
     private OrderUpdateProducer orderUpdateProducer;
     @Autowired
     private ApplicationEventPublisher eventPublisher;
+    /** SSE della sessione al tavolo (pagina table-live del cliente); assente nei test unitari. */
+    @Autowired(required = false)
+    private TableSessionUpdateProducer tableSessionUpdateProducer;
     @Autowired
     private TakeawaySlotService takeawaySlotService;
     @Autowired
@@ -90,6 +94,9 @@ public class OrderComandService {
     private PrepaymentPolicy prepaymentPolicy;
     @Autowired
     private MongoTemplate mongoTemplate;
+    /** Lazy: TableSessionService dipende da questo service (apertura tavolo da ordine del cameriere). */
+    @Autowired
+    private ObjectProvider<TableSessionService> tableSessionService;
     /** Lazy: PaymentService dipende (tramite il calcolo del totale) da questo service. */
     @Autowired
     private ObjectProvider<ComandPaymentOperations> paymentOperations;
@@ -128,13 +135,16 @@ public class OrderComandService {
             switch (addComandWaiter.getComandWaiterType()) {
                 case TABLE -> {
                     TableDto tableEntityJpa = tableUtils.findByIdAndIdAgencyAndDeleted(addComandWaiter.getIdTable(), idAgency).orElseThrow(() -> new EntityNotFoundException("Tavolo non trovato o eliminato"));
-                    if(!tableEntityJpa.isBusy()){
-                        tableEntityJpa.setBusy(true);
-                        tableEntityJpa.setSeats(addComandWaiter.getSeats() > 0 ? addComandWaiter.getSeats() : 1);
-                        tableEntityJpa.setSessionId(UUID.randomUUID().toString().concat(Long.toString(System.currentTimeMillis())));
-                        tableEntityJpa = tableUtils.save(tableEntityJpa, idAgency);
-                    }
                     String tableSessionId = tableEntityJpa.getSessionId();
+                    if(!tableEntityJpa.isBusy()){
+                        // Stessa apertura del cameriere/Sala: crea la sessione Mongo (codice di accesso) così i clienti possono unirsi
+                        Map<String, Object> opened = tableSessionService.getObject().openSession(tableEntityJpa.getId(), idAgency,
+                                addComandWaiter.getSeats() > 0 ? addComandWaiter.getSeats() : 1);
+                        if (TableSessionService.extractStatus(opened) != 200) {
+                            throw new IllegalStateException("Apertura tavolo non riuscita: " + opened.get("error"));
+                        }
+                        tableSessionId = (String) opened.get("sessionId");
+                    }
                     comand = new ComandFromWaiterJpa(idAgency, addComandWaiter.getIdTable(), idUser, ComandStatus.PROGRESS, orders, tableSessionId);
                 }
                 case HOME -> comand = new ComandFromWaiterJpa(idAgency, idUser, ComandStatus.PROGRESS, orders,
@@ -357,15 +367,24 @@ public class OrderComandService {
         } catch (Exception e) {
             ErrorLog.logger.error("Errore pubblicazione ComandCreatedEvent comandId=" + saved.getId(), e);
         }
-        sendOrderKafkaEvent(saved.getId(), saved.getStatus().toString(), saved.getIdAgency());
+        sendOrderKafkaEvent(saved, saved.getStatus().toString());
     }
 
-    private void sendOrderKafkaEvent(String id, String status, long idAgency) {
+    /**
+     * Evento Kafka order-updated (dashboard + pagina stato asporto) e, se la comanda appartiene a una
+     * sessione al tavolo, anche table-session-updated: la pagina table-live del cliente ascolta solo quello.
+     */
+    private void sendOrderKafkaEvent(Comand c, String status) {
+        long idAgency = c.getIdAgency();
         try {
-            String json = String.format("{\"id\":\"%s\",\"status\":\"%s\",\"idAgency\":%d}", id, status, idAgency);
+            String json = String.format("{\"id\":\"%s\",\"status\":\"%s\",\"idAgency\":%d}", c.getId(), status, idAgency);
             orderUpdateProducer.sendUpdate(idAgency, json);
         } catch (Exception e) {
             ErrorLog.logger.error("Errore invio kafka order event", e);
+        }
+        String sessionId = c.getTableSessionId();
+        if (tableSessionUpdateProducer != null && sessionId != null && !sessionId.isBlank()) {
+            tableSessionUpdateProducer.sendUpdate(sessionId, "state");
         }
     }
 
@@ -427,7 +446,7 @@ public class OrderComandService {
 
     /** Ordine "su richiesta" visibile al locale: evento Kafka (dashboard + SSE) ma niente ComandCreatedEvent/stampa. */
     private void notifyAwaitingApproval(Comand c) {
-        sendOrderKafkaEvent(c.getId(), ComandStatus.AWAIT_APPROVAL.name(), c.getIdAgency());
+        sendOrderKafkaEvent(c, ComandStatus.AWAIT_APPROVAL.name());
     }
 
     // ── Prepagamento / approvazione ──────────────────────────────────────────
@@ -560,7 +579,7 @@ public class OrderComandService {
         } catch (Exception e) {
             ErrorLog.logger.error("Errore pubblicazione ComandStatusChangedEvent comandId=" + c.getId(), e);
         }
-        if (notifyDashboards) sendOrderKafkaEvent(c.getId(), ComandStatus.DELETED.name(), idAgency);
+        if (notifyDashboards) sendOrderKafkaEvent(c, ComandStatus.DELETED.name());
     }
 
     /**
@@ -669,7 +688,7 @@ public class OrderComandService {
             } catch (Exception e) {
                 ErrorLog.logger.error("Errore pubblicazione ComandStatusChangedEvent comandId=" + idComand, e);
             }
-            sendOrderKafkaEvent(idComand, comandStatus.toString(), idAgency);
+            sendOrderKafkaEvent(comandFromWaiterJpa, comandStatus.toString());
 
         } catch (Exception e) {
             ErrorLog.logger.error("Errore cambio stato comanda con id " + idComand, e);

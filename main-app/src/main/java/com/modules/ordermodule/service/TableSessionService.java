@@ -263,7 +263,6 @@ public class TableSessionService {
             if (opt.isEmpty()) return errorResp(404, "SESSION_NOT_FOUND");
             TableSessionJpa session = opt.get();
             if (clientSessionId == null || findClient(session, clientSessionId) == null) return errorResp(403, "NOT_JOINED");
-            if (session.getStatus() == SessionStatus.SUBMITTED) return errorResp(409, "ALREADY_SUBMITTED");
             if (session.getStatus() != SessionStatus.OPEN) return errorResp(409, "NOT_SUBMITTABLE");
             return doSubmit(session, false);
         }
@@ -310,9 +309,19 @@ public class TableSessionService {
 
         if (created.isEmpty()) return errorResp(409, "NOT_SUBMITTABLE");
 
-        session.setStatus(SessionStatus.SUBMITTED);
+        // Giro inviato: la sessione resta OPEN (stesso codice, stessi clienti) per i giri successivi
+        // (es. dolci dopo i primi) finché lo staff non chiude/libera il tavolo. Lo storico delle comande
+        // inviate si accumula; "pronto" e bozze si azzerano per il prossimo giro (solo per chi è stato inviato:
+        // con l'invio forzato del cameriere chi non era pronto conserva la propria bozza).
         session.setSubmittedAt(OffsetDateTime.now());
-        session.setComands(created);
+        List<TableSessionJpa.SubmittedComand> history = session.getComands() == null
+                ? new ArrayList<>() : new ArrayList<>(session.getComands());
+        history.addAll(created);
+        session.setComands(history);
+        for (TableSessionJpa.SessionClient c : readyClients) {
+            c.setReady(false);
+            c.setDraftOrder(new ArrayList<>());
+        }
         // mark TableEntity busy in sync with what waiter probably already set
         ensureTableBusy(tableId, idAgency, session.getId(), session.getSeats());
         tableSessionRepository.save(session);
@@ -406,6 +415,8 @@ public class TableSessionService {
         table.setBusy(true);
         table.setSeats(seats);
         table.setSessionId(sessionId);
+        // stesso codice della sessione anche sul tavolo (dashboard / getAll)
+        table.setCode(accessCode);
         tableUtils.save(table, idAgency);
 
         log.info("session open sessionId={} tableId={} idAgency={} seats={}",
@@ -461,34 +472,61 @@ public class TableSessionService {
         if (session.getIdAgency() != idAgency) return errorResp(403, "FORBIDDEN");
 
         synchronized (session.getId().intern()) {
-            TableSessionJpa fresh = tableSessionRepository.findById(session.getId()).orElse(session);
-            fresh.setStatus(SessionStatus.CLOSED);
-            fresh.setClosedAt(OffsetDateTime.now());
-            // discard drafts
-            for (TableSessionJpa.SessionClient c : fresh.getClients()) {
-                c.setDraftOrder(new ArrayList<>());
-                c.setReady(false);
-            }
-            tableSessionRepository.save(fresh);
+            TableSessionJpa fresh = markClosed(session);
 
             Optional<TableDto> tOpt = tableUtils.findByIdAndIdAgencyAndDeleted(tableId, idAgency);
             tOpt.ifPresent(t -> {
                 t.setBusy(false);
                 t.setSeats(0);
                 t.setSessionId("");
+                t.setCode("");
                 tableUtils.save(t, idAgency);
             });
-
-            log.info("session close sessionId={} tableId={} idAgency={}",
-                    fresh.getId(), tableId, idAgency);
-
-            emit(fresh.getId(), "closed");
 
             Map<String, Object> resp = new LinkedHashMap<>();
             resp.put("sessionId", fresh.getId());
             resp.put("status", "CLOSED");
             return resp;
         }
+    }
+
+    /**
+     * Sessione attualmente legata al tavolo: quella OPEN, altrimenti quella fissata sul tavolo (es. SUBMITTED).
+     * Da leggere PRIMA di liberare il tavolo con i vecchi endpoint /free, che azzerano il sessionId.
+     */
+    public String currentSessionId(long tableId, long idAgency) {
+        Optional<TableSessionJpa> open = tableSessionRepository.findByTableIdAndStatus(tableId, SessionStatus.OPEN);
+        if (open.isPresent()) return open.get().getIdAgency() == idAgency ? open.get().getId() : null;
+        return tableUtils.findByIdAndIdAgencyAndDeleted(tableId, idAgency)
+                .map(TableDto::getSessionId)
+                .filter(id -> id != null && !id.isEmpty())
+                .orElse(null);
+    }
+
+    /** Chiude la sessione (tavolo già liberato dal chiamante): scarta le bozze e avvisa i clienti via SSE. */
+    public void closeSessionById(String sessionId, long idAgency) {
+        if (sessionId == null || sessionId.isBlank()) return;
+        TableSessionJpa session = tableSessionRepository.findById(sessionId).orElse(null);
+        if (session == null || session.getIdAgency() != idAgency || session.getStatus() == SessionStatus.CLOSED) return;
+        synchronized (session.getId().intern()) {
+            markClosed(session);
+        }
+    }
+
+    private TableSessionJpa markClosed(TableSessionJpa session) {
+        TableSessionJpa fresh = tableSessionRepository.findById(session.getId()).orElse(session);
+        fresh.setStatus(SessionStatus.CLOSED);
+        fresh.setClosedAt(OffsetDateTime.now());
+        // discard drafts
+        for (TableSessionJpa.SessionClient c : fresh.getClients()) {
+            c.setDraftOrder(new ArrayList<>());
+            c.setReady(false);
+        }
+        tableSessionRepository.save(fresh);
+        log.info("session close sessionId={} tableId={} idAgency={}",
+                fresh.getId(), fresh.getTableId(), fresh.getIdAgency());
+        emit(fresh.getId(), "closed");
+        return fresh;
     }
 
     // =====================================================================
@@ -572,10 +610,14 @@ public class TableSessionService {
             resp.put("accessCode", s.getAccessCode());
         }
         resp.put("status", s.getStatus().toString());
+        // Dal secondo giro chi ha già ordinato e non si è rimesso "pronto" non blocca gli altri
+        // (es. solo due persone ordinano il dolce); al primo giro devono essere pronti tutti.
+        Set<String> alreadyOrdered = s.getComands() == null ? Set.of() : s.getComands().stream()
+                .map(TableSessionJpa.SubmittedComand::getClientSessionId).collect(Collectors.toSet());
         boolean submittable = s.getStatus() == SessionStatus.OPEN
                 && !s.getClients().isEmpty()
-                && s.getClients().stream().allMatch(TableSessionJpa.SessionClient::isReady)
-                && s.getClients().stream().anyMatch(c -> c.getDraftOrder() != null && !c.getDraftOrder().isEmpty());
+                && s.getClients().stream().allMatch(c -> c.isReady() || alreadyOrdered.contains(c.getClientSessionId()))
+                && s.getClients().stream().anyMatch(c -> c.isReady() && c.getDraftOrder() != null && !c.getDraftOrder().isEmpty());
         resp.put("submittable", submittable);
         resp.put("clients", buildClientsList(s, youId, waiterView));
 

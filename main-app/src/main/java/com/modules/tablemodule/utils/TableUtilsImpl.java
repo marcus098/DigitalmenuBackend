@@ -32,6 +32,8 @@ public class TableUtilsImpl implements TableUtils {
         tableEntityJpaOrigin.setSeats(tableDto.getSeats());
         tableEntityJpaOrigin.setName(tableDto.getName());
         tableEntityJpaOrigin.setSessionId(tableDto.getSessionId() != null ? tableDto.getSessionId() : tableEntityJpaOrigin.getSessionId());
+        // codice d'accesso della sessione al tavolo (vuoto a tavolo libero); null = invariato
+        if (tableDto.getCode() != null) tableEntityJpaOrigin.setCode(tableDto.getCode());
         TableEntityJpa tableEntityJpa = tableEntityRepository.save(tableEntityJpaOrigin);
         return new TableDto(tableEntityJpa);
     }

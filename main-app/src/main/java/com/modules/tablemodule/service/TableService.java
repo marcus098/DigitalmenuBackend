@@ -26,6 +26,14 @@ import java.util.stream.Collectors;
 
 @Service
 public class TableService {
+    /**
+     * Comande ancora da evadere: bloccano liberazione/eliminazione del tavolo (o vengono completate da quelle forzate).
+     * AWAIT = ordine del cliente al tavolo non ancora preso in carico dallo staff.
+     */
+    private static final List<ComandStatus> OPEN_COMAND_STATUSES =
+            List.of(ComandStatus.AWAIT, ComandStatus.PENDING, ComandStatus.PROGRESS);
+    private static final List<String> OPEN_COMAND_STATUS_NAMES =
+            OPEN_COMAND_STATUSES.stream().map(ComandStatus::toString).toList();
     @Autowired
     private TableEntityRepository tableEntityRepository;
     @Autowired
@@ -161,7 +169,7 @@ public class TableService {
 
             TableEntityJpa table = tableEntityJpa.get();
             //cerco su mongodb se ci sono comande associate al tavolo
-            List<Comand> comands = orderUtils.findByTableSessionIdAndIdAgencyAndStatusIn(table.getSessionId(), idAgency, List.of(ComandStatus.PENDING.toString(), ComandStatus.PROGRESS.toString()));
+            List<Comand> comands = orderUtils.findByTableSessionIdAndIdAgencyAndStatusIn(table.getSessionId(), idAgency, OPEN_COMAND_STATUS_NAMES);
 
             // se ci sono comande mando errore 402
             if (!comands.isEmpty()) {
@@ -200,7 +208,7 @@ public class TableService {
 
             TableEntityJpa table = tableEntityJpa.get();
             // cerco su mongodb le comande associate al tavolo
-            List<Comand> comands = orderUtils.findByTableSessionIdAndIdAgencyAndStatusIn(table.getSessionId(), idAgency, List.of(ComandStatus.PENDING.toString(), ComandStatus.PROGRESS.toString()));
+            List<Comand> comands = orderUtils.findByTableSessionIdAndIdAgencyAndStatusIn(table.getSessionId(), idAgency, OPEN_COMAND_STATUS_NAMES);
             List<EntityLog<?>> comandLogs = new ArrayList<>();
 
             // segno come completate tutte le comande e le salvo su mongo
@@ -213,7 +221,7 @@ public class TableService {
                 }
                 // update condizionale (solo status): non sovrascrive paid/paymentIntentId scritti dal webhook
                 orderUtils.updateStatusIfIn(comands.stream().map(Comand::getId).toList(), idAgency,
-                        List.of(ComandStatus.PENDING, ComandStatus.PROGRESS), ComandStatus.COMPLETED);
+                        OPEN_COMAND_STATUSES, ComandStatus.COMPLETED);
                 orderUtils.saveAllLogs(comandLogs);
             }
 
@@ -250,7 +258,7 @@ public class TableService {
             }
             TableEntityJpa table = tableEntityJpa.get();
             // cerco su mongodb le comande attive associate al tavolo
-            List<Comand> comands = orderUtils.findByTableSessionIdAndIdAgencyAndStatusIn(table.getSessionId(), idAgency, List.of(ComandStatus.PENDING.toString(), ComandStatus.PROGRESS.toString()));
+            List<Comand> comands = orderUtils.findByTableSessionIdAndIdAgencyAndStatusIn(table.getSessionId(), idAgency, OPEN_COMAND_STATUS_NAMES);
             List<EntityLog<?>> comandLogs = new ArrayList<>();
 
             // segno come completate tutte le comande e le salvo su mongo
@@ -263,7 +271,7 @@ public class TableService {
                 }
                 // update condizionale (solo status): non sovrascrive paid/paymentIntentId scritti dal webhook
                 orderUtils.updateStatusIfIn(comands.stream().map(Comand::getId).toList(), idAgency,
-                        List.of(ComandStatus.PENDING, ComandStatus.PROGRESS), ComandStatus.COMPLETED);
+                        OPEN_COMAND_STATUSES, ComandStatus.COMPLETED);
                 orderUtils.saveAllLogs(comandLogs);
             }
 
@@ -274,8 +282,10 @@ public class TableService {
                 table.setSeats(seats);
                 table.setSessionId(UUID.randomUUID().toString().concat(Long.toString(System.currentTimeMillis())));
             }else{
-                returnValue = utilities.generateCode();
-                table.setCode(returnValue);
+                // Il codice d'accesso appartiene alla sessione al tavolo (TableSessionService.openSession):
+                // a tavolo libero non ce n'è nessuno
+                returnValue = "";
+                table.setCode("");
                 table.setSessionId("");
             }
             table = tableEntityRepository.save(table);
@@ -311,7 +321,7 @@ public class TableService {
 
             if(!setBusy) {
                 //cerco su mongodb se ci sono comande associate al tavolo
-                List<Comand> comands = orderUtils.findByTableSessionIdAndIdAgencyAndStatusIn(table.getSessionId(), idAgency, List.of(ComandStatus.PENDING.toString(), ComandStatus.PROGRESS.toString()));
+                List<Comand> comands = orderUtils.findByTableSessionIdAndIdAgencyAndStatusIn(table.getSessionId(), idAgency, OPEN_COMAND_STATUS_NAMES);
 
                 // se ci sono comande mando errore 402
                 if (!comands.isEmpty()) {
@@ -326,8 +336,10 @@ public class TableService {
                 table.setSeats(seats);
                 table.setSessionId(UUID.randomUUID().toString().concat(Long.toString(System.currentTimeMillis())));
             }else{
-                returnValue = utilities.generateCode();
-                table.setCode(returnValue);
+                // Il codice d'accesso appartiene alla sessione al tavolo (TableSessionService.openSession):
+                // a tavolo libero non ce n'è nessuno
+                returnValue = "";
+                table.setCode("");
                 table.setSessionId("");
             }
             table = tableEntityRepository.save(table);

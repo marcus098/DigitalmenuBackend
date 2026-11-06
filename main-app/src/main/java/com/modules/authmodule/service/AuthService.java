@@ -284,7 +284,9 @@ public class AuthService {
                 count++;
             }
 
-            AgencyJpa agency = new AgencyJpa(signupAgency.getName(), localname, utilities.generateOtpEmailCode(), utilities.generateOtpEmailCode());
+            // originalName = nome del locale come digitato nel form (visualizzato), name = slug univoco per gli URL
+            String displayName = signupAgency.getLocalname().trim();
+            AgencyJpa agency = new AgencyJpa(displayName, localname, utilities.generateOtpEmailCode(), utilities.generateOtpEmailCode());
             agency = agencyRepository.save(agency);
 
             String optEmail = utilities.generateOtpEmailCode();
@@ -310,7 +312,10 @@ public class AuthService {
             if (file != null)
                 logoUrl = fileUtils.uploadImageWithBucket(file, user.getIdAgency(), user.getId(), "img");
 
-            StyleDto styleDto = styleUtils.saveNewStyle(logoUrl.isEmpty() ? new StyleDto() : new StyleDto(logoUrl), user.getIdAgency(), user.getId());
+            StyleDto newStyle = logoUrl.isEmpty() ? new StyleDto() : new StyleDto(logoUrl);
+            // header della dashboard e vetrina pubblica mostrano il nome del locale, non lo slug
+            newStyle.setRestaurantName(displayName);
+            StyleDto styleDto = styleUtils.saveNewStyle(newStyle, user.getIdAgency(), user.getId());
 
             try {
                 // invio email

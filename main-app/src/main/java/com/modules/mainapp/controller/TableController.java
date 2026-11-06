@@ -3,6 +3,8 @@ package com.modules.mainapp.controller;
 import com.modules.common.dto.TableDto;
 import com.modules.common.responses.DataResponse;
 import com.modules.mainapp.esl.EslService;
+import com.modules.ordermodule.service.TableSessionService;
+import com.modules.servletconfiguration.security.AuthenticatedUserProvider;
 import com.modules.tablemodule.requests.AddTable;
 import com.modules.tablemodule.requests.UpdateTables;
 import com.modules.tablemodule.service.TableService;
@@ -13,6 +15,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @CrossOrigin(origins = "*")
 @RequestMapping("/api/tables")
@@ -23,6 +26,12 @@ public class TableController {
 
     @Autowired
     private EslService eslService;
+
+    @Autowired
+    private TableSessionService tableSessionService;
+
+    @Autowired
+    private AuthenticatedUserProvider authUserProvider;
 
     @PreAuthorize("hasRole('ROLE_ADMIN')")
     @PostMapping("/add")
@@ -52,7 +61,9 @@ public class TableController {
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
     @GetMapping("/free/{idTable}")
     public ResponseEntity<DataResponse<String>> freeTable(@PathVariable("idTable") @Min(1) long idTable) {
+        String sessionId = tableSessionService.currentSessionId(idTable, authUserProvider.getAgencyId());
         String statusMessage = tableService.setBusy(idTable, false, 1);
+        closeSession(sessionId, statusMessage);
         int status = 400;
         if (statusMessage.equals("404")) {
             status = 404;
@@ -72,24 +83,36 @@ public class TableController {
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
     @GetMapping("/freeAndClose/{idTable}")
     public ResponseEntity<DataResponse<String>> freeAndCloseTable(@PathVariable("idTable") @Min(1) long idTable) {
+        String sessionId = tableSessionService.currentSessionId(idTable, authUserProvider.getAgencyId());
         String statusMessage = tableService.setBusyAndCloseComands(idTable, false, 1);
+        closeSession(sessionId, statusMessage);
         return ResponseEntity.status(statusMessage == null ? 400 : 200).body(new DataResponse<String>(null, statusMessage));
     }
 
 
-    // da chiamare quando i clienti occupano un tavolo. Serve il numero dei posti
+    // da chiamare quando i clienti occupano un tavolo. Serve il numero dei posti.
+    // Passa dalla stessa apertura sessione di POST /{id}/session/open: senza sessione Mongo i clienti
+    // resterebbero bloccati sulla pagina del codice di accesso. Restituisce il codice di accesso (4 caratteri).
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
     @GetMapping("/takes/{idTable}/{seats}")
     public ResponseEntity<DataResponse<String>> takesTable(@PathVariable("idTable") @Min(1) long idTable, @PathVariable("seats") @Min(1) int seats) {
-        String newCode = tableService.setBusy(idTable, true, seats);
-        if (newCode != null && !newCode.equals("400") && !newCode.equals("404")) {
-            eslService.updateTableTag(idTable);
+        Map<String, Object> resp = tableSessionService.openSession(idTable, authUserProvider.getAgencyId(), seats);
+        int status = TableSessionService.extractStatus(resp);
+        if (status != 200) {
+            return ResponseEntity.status(status).body(new DataResponse<String>(null, String.valueOf(resp.get("error"))));
         }
-        return ResponseEntity.status(newCode == null ? 400 : 200).body(new DataResponse<String>(null, newCode));
+        eslService.updateTableTag(idTable);
+        return ResponseEntity.ok(new DataResponse<String>(null, String.valueOf(resp.get("accessCode"))));
+    }
+
+    /** Dopo una liberazione riuscita chiude anche la sessione al tavolo (Mongo), così i clienti vengono avvisati via SSE. */
+    private void closeSession(String sessionId, String freeResult) {
+        if (sessionId == null || freeResult == null || freeResult.equals("404") || freeResult.equals("400") || freeResult.equals("comands")) return;
+        tableSessionService.closeSessionById(sessionId, authUserProvider.getAgencyId());
     }
 
 
-    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
     @PostMapping("/updateTablesPosition")
     public ResponseEntity<DataResponse<List<TableDto>>> updateTablesPosition(@RequestBody UpdateTables updateTable) {
         List<TableDto> tables = tableService.updateTablesPosition(updateTable);
@@ -97,7 +120,7 @@ public class TableController {
     }
 
 
-    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
     @PostMapping("/updateTable")
     public ResponseEntity<DataResponse<TableDto>> updateTable(@RequestBody TableDto tableDto) {
         TableDto table = tableService.updateTable(tableDto);
