@@ -53,6 +53,8 @@ public class ProductService {
     private Utilities utilities;
     @Autowired
     private ProductMapper productMapper;
+    @Autowired
+    private com.modules.categorymodule.repository.CategoryRepository categoryRepository;
 
     @Transactional
     public ProductDto addProduct(AddProduct addProduct, MultipartFile file, List<OptionInProduct> options) {
@@ -156,6 +158,7 @@ public class ProductService {
             // Gruppi di varianti non inviati (client non aggiornato): mantengo quelli esistenti
             if (variantGroups != null)
                 product.setVariantGroups(VariantGroups.toJson(variantGroups));
+            moveToCategory(product, updateProduct.getIdCategory(), idAgency);
             productRepository.save(product);
 
             EntityLog productLog = new EntityLog<>(LogOperation.OTHER, oldProductDto, productMapper.toDto(product), "function updateProduct", idUser, idAgency);
@@ -165,6 +168,21 @@ public class ProductService {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * Sposta il prodotto in un'altra categoria del locale (in fondo) e chiude il buco nella vecchia.
+     * Categoria assente, uguale o di un altro locale: nessun cambio.
+     */
+    private void moveToCategory(ProductJpa product, Long newCategory, long idAgency) {
+        Long oldCategory = product.getIdCategory();
+        if (newCategory == null || newCategory <= 0 || newCategory.equals(oldCategory)) return;
+        if (categoryRepository.findByIdAndIdAgencyAndDeleted(newCategory, idAgency, false).isEmpty()) return;
+        if (oldCategory != null && oldCategory > 0)
+            productRepository.decrementPositions(idAgency, oldCategory, product.getPositionProgressive() + 1, Integer.MAX_VALUE);
+        Integer max = productRepository.findMaxPositionByIdAgencyAndIdCategory(idAgency, newCategory);
+        product.setIdCategory(newCategory);
+        product.setPositionProgressive(max == null ? 1 : max + 1);
     }
 
     @Transactional

@@ -283,7 +283,14 @@ public class TakeawaySlotService {
             } catch (Exception e) {
                 continue;
             }
-            while (!t.isAfter(endT.minusMinutes(1))) {
+            // Minuti dalla mezzanotte: con LocalTime una fascia che arriva alle 00:00 ripartirebbe da capo all'infinito.
+            // Fine 00:00 o prima dell'inizio = fino a mezzanotte (le fasce sono per giorno).
+            int startMin = t.toSecondOfDay() / 60;
+            int endMin = endT.toSecondOfDay() / 60;
+            if (endMin <= startMin) endMin = 24 * 60;
+            if (duration <= 0) continue;
+            for (int m = startMin; m < endMin; m += duration) {
+                t = LocalTime.of(m / 60, m % 60);
                 LocalDateTime slotStart = LocalDateTime.of(date, t);
                 SlotDto slot = new SlotDto();
                 slot.setTime(t.format(HHMM));
@@ -316,7 +323,6 @@ public class TakeawaySlotService {
                 }
 
                 result.add(slot);
-                t = t.plusMinutes(duration);
             }
         }
         return result;
