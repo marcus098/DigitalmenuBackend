@@ -7,6 +7,7 @@ import com.modules.webfluxmodule.models.db.Users;
 import com.modules.webfluxmodule.services.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.security.core.context.SecurityContext;
@@ -16,6 +17,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -148,7 +150,7 @@ public class AllController {
      * Endpoint per lo streaming di aggiornamenti ad admin autenticati.
      */
     @GetMapping(value = "/auth/admin", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<Map<String, Object>> streamAuthUpdates(@RequestParam(required = true) String token) {
+    public Flux<ServerSentEvent<Map<String, Object>>> streamAuthUpdates(@RequestParam(required = true) String token) {
         // Token in query string perché EventSource non può inviare header: NON loggare mai l'URL di questa
         // richiesta (niente DEBUG su org.springframework.web / reactor.netty, niente access log con query).
         long userId;
@@ -175,7 +177,7 @@ public class AllController {
             Sinks.Many<Map<String, Object>> userSink = sinkManager.register(agencyId, sessionId);
 
             // Restituisce il flusso e gestisce la disconnessione
-            return userSink.asFlux()
+            return withHeartbeat(userSink.asFlux())
                     .doOnCancel(() -> sinkManager.unregister(agencyId, sessionId))
                     .doOnTerminate(() -> sinkManager.unregister(agencyId, sessionId));
         });
@@ -186,7 +188,7 @@ public class AllController {
      * Anche questo endpoint ora usa il pattern register/unregister per coerenza.
      */
     @GetMapping(value = "/public/updates", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<Map<String, Object>> streamPublicUpdates(
+    public Flux<ServerSentEvent<Map<String, Object>>> streamPublicUpdates(
             @RequestParam(required = false) Long idAgency,
             @RequestParam(required = false) String localname
     ) {
@@ -201,9 +203,26 @@ public class AllController {
                     Sinks.Many<Map<String, Object>> publicSink = sinkManager.register(foundAgencyId.getId(), sessionId);
 
                     // Restituisce il flusso e gestisce la disconnessione
-                    return publicSink.asFlux()
+                    return withHeartbeat(publicSink.asFlux())
                             .doOnCancel(() -> sinkManager.unregister(foundAgencyId.getId(), sessionId))
                             .doOnTerminate(() -> sinkManager.unregister(foundAgencyId.getId(), sessionId));
                 });
+    }
+
+    /** Ogni quanto parte un commento ":ping" sugli stream SSE. */
+    private static final Duration HEARTBEAT = Duration.ofSeconds(20);
+
+    /**
+     * Aggiunge allo stream un commento SSE subito all'apertura e poi ogni 20 secondi.
+     * Senza, la risposta resta vuota finché non arriva un evento: il client non vede la connessione aperta
+     * (l'app mostra "aggiornamenti in pausa") e Cloudflare chiude gli stream fermi dopo ~100 secondi.
+     * I commenti sono ignorati da EventSource (browser e react-native-sse).
+     */
+    static Flux<ServerSentEvent<Map<String, Object>>> withHeartbeat(Flux<Map<String, Object>> data) {
+        Flux<ServerSentEvent<Map<String, Object>>> events = data.map(d -> ServerSentEvent.builder(d).build());
+        Flux<ServerSentEvent<Map<String, Object>>> pings = Flux.interval(Duration.ZERO, HEARTBEAT)
+                .map(i -> ServerSentEvent.<Map<String, Object>>builder().comment("ping").build());
+        // publish: un solo abbonamento al sink; quando i dati finiscono si fermano anche i ping
+        return events.publish(ev -> Flux.merge(ev, pings.takeUntilOther(ev.ignoreElements().then())));
     }
 }
