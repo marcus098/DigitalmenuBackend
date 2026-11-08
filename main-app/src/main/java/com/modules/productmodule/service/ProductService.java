@@ -83,7 +83,7 @@ public class ProductService {
             List<Integer> allergensList = utilities.normalizeAllergens(addProduct.getAllergens());
             List<Integer> tracesList = utilities.normalizeAllergens(addProduct.getTraces());
             if(file != null)
-                addProduct.setImage(fileUtils.uploadImageWithBucket(file, idAgency, idUser, "img"));
+                addProduct.setImage(requireUploaded(fileUtils.uploadImageWithBucket(file, idAgency, idUser, "img")));
             ProductJpa newProduct = new ProductJpa(
                     addProduct.getName(),
                     addProduct.getDescription(),
@@ -131,7 +131,7 @@ public class ProductService {
             }
 
             if(file != null)
-                updateProduct.setImage(fileUtils.uploadImageWithBucket(file, idAgency, idUser, "img"));
+                updateProduct.setImage(requireUploaded(fileUtils.uploadImageWithBucket(file, idAgency, idUser, "img")));
 
             ProductJpa product = optionalProduct.get();
             ProductDto oldProductDto = productMapper.toDto(product);
@@ -174,6 +174,12 @@ public class ProductService {
      * Sposta il prodotto in un'altra categoria del locale (in fondo) e chiude il buco nella vecchia.
      * Categoria assente, uguale o di un altro locale: nessun cambio.
      */
+    /** Foto non caricata: meglio un errore che salvare il piatto senza immagine (o perdere quella vecchia). */
+    private static String requireUploaded(String path) {
+        if (path == null || path.isBlank()) throw new IllegalStateException("Caricamento immagine non riuscito");
+        return path;
+    }
+
     private void moveToCategory(ProductJpa product, Long newCategory, long idAgency) {
         Long oldCategory = product.getIdCategory();
         if (newCategory == null || newCategory <= 0 || newCategory.equals(oldCategory)) return;

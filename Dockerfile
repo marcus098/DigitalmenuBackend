@@ -14,10 +14,12 @@ COPY main-app/src main-app/src/
 
 RUN mvn clean package -DskipTests -B -q
 
-FROM eclipse-temurin:17-jre-alpine
+# Runtime su Ubuntu (glibc), non Alpine: la libreria webp-imageio carica un libwebp nativo compilato per glibc.
+# Su Alpine (musl) la conversione in WebP falliva e la lettura di un .webp mandava in crash la JVM.
+FROM eclipse-temurin:17-jre
 WORKDIR /app
 # Utente non-root
-RUN addgroup -S app && adduser -S -G app -H -s /sbin/nologin app
+RUN groupadd --system app && useradd --system --gid app --no-create-home --shell /usr/sbin/nologin app
 COPY --from=builder /app/main-app/target/main-app-*.jar app.jar
 USER app:app
 # Nessun application.properties nell'immagine (vedi .dockerignore): la configurazione arriva a runtime

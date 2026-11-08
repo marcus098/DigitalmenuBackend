@@ -367,36 +367,45 @@ public class Utilities {
         return hints;
     }
 
+    /** Lato massimo delle immagini caricate (prodotti, categorie, sito). */
+    private static final int MAX_IMAGE_SIDE = 1024;
+
+    /** Legge e ridimensiona l'immagine caricata; null se il file non è un'immagine leggibile. */
+    private BufferedImage readResized(MultipartFile imageFile) throws IOException {
+        BufferedImage originalImage = ImageIO.read(new ByteArrayInputStream(imageFile.getBytes()));
+        if (originalImage == null) return null;
+        if (originalImage.getWidth() <= MAX_IMAGE_SIDE && originalImage.getHeight() <= MAX_IMAGE_SIDE) return originalImage;
+        return Thumbnails.of(originalImage).size(MAX_IMAGE_SIDE, MAX_IMAGE_SIDE).asBufferedImage();
+    }
+
+    /** Immagine ridimensionata in WebP; null se la conversione non è possibile (vedi optimizeImageAsJpeg). */
     public byte[] optimizeImage(MultipartFile imageFile) {
         try {
-            byte[] webpBytes = imageFile.getBytes();
-            BufferedImage originalImage = ImageIO.read(new ByteArrayInputStream(webpBytes));
+            BufferedImage resized = readResized(imageFile);
+            return resized == null ? null : convertToWebP(resized);
+        } catch (Throwable e) {
+            // Throwable: un problema della libreria nativa webp arriva come LinkageError, non come Exception
+            ErrorLog.logger.error("Errore ottimizzazione immagine (webp). ", e);
+        }
+        return null;
+    }
 
-            // Specifica la dimensione desiderata dell'immagine ottimizzata
-            int targetSize = 1024; // 1 KB
-            long length = imageFile.getBytes().length;
-            double resize = 0.5;
-            if (length > 7000000) {
-                resize = 0.2;
-            } else if (length > 5000000) {
-                resize = 0.3;
-            } else if (length > 3145728) {
-                resize = 0.4;
-            } else if (length < 800000) {
-                resize = 0.9;
-            }
-            // Ridimensiona l'immagine
-            System.out.println("test");
-            BufferedImage resizedImage = Thumbnails.of(originalImage)
-                    .size(targetSize, targetSize)
-                    .outputQuality(resize)
-                    .asBufferedImage();
-
-            // Converti l'immagine ridimensionata in formato WebP
-            return convertToWebP(resizedImage);
-
-        } catch (Exception e) {
-            ErrorLog.logger.error("Errore ottimizzazione immagine. ", e);
+    /** Ripiego quando il WebP non è disponibile: JPEG ridimensionato, trasparenza su fondo bianco. */
+    public byte[] optimizeImageAsJpeg(MultipartFile imageFile) {
+        try {
+            BufferedImage resized = readResized(imageFile);
+            if (resized == null) return null;
+            BufferedImage rgb = new BufferedImage(resized.getWidth(), resized.getHeight(), BufferedImage.TYPE_INT_RGB);
+            java.awt.Graphics2D g = rgb.createGraphics();
+            g.setColor(java.awt.Color.WHITE);
+            g.fillRect(0, 0, rgb.getWidth(), rgb.getHeight());
+            g.drawImage(resized, 0, 0, null);
+            g.dispose();
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            Thumbnails.of(rgb).scale(1.0).outputFormat("jpg").outputQuality(0.85).toOutputStream(out);
+            return out.toByteArray();
+        } catch (Throwable e) {
+            ErrorLog.logger.error("Errore ottimizzazione immagine (jpeg). ", e);
         }
         return null;
     }
@@ -405,12 +414,10 @@ public class Utilities {
         try {
             ImageIO.scanForPlugins();
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-
-            // Utilizza ImageIO per scrivere l'immagine WebP
-            ImageIO.write(image, "webp", outputStream);
-
-            return outputStream.toByteArray();
-        } catch (IOException e) {
+            if (!ImageIO.write(image, "webp", outputStream)) return null; // nessun writer webp registrato
+            byte[] bytes = outputStream.toByteArray();
+            return bytes.length == 0 ? null : bytes;
+        } catch (Throwable e) {
             ErrorLog.logger.error("Errore conversione in webp ", e);
         }
         return null;

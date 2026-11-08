@@ -223,11 +223,19 @@ public class ImageService {
             if (file != null && file.getContentType() != null && file.getContentType().startsWith("image")) {
                 UUID uuid = UUID.randomUUID();
                 byte[] optimizedImage = utilities.optimizeImage(file);
+                String extension = "webp";
+                String contentType = "image/webp";
+                if (optimizedImage == null) {
+                    // WebP non disponibile (libreria nativa): si salva in JPEG invece di perdere la foto
+                    optimizedImage = utilities.optimizeImageAsJpeg(file);
+                    extension = "jpg";
+                    contentType = "image/jpeg";
+                }
                 if (optimizedImage == null) {
                     throw new Exception("Errore ottimizzazione immagine");
                 }
 
-                imageName = uuid.toString() + ".webp";
+                imageName = uuid.toString() + "." + extension;
                 objectName = folder.equals("cards") ? folder + "/" + imageName : idAgency + "/img/" + imageName;
 
                 ImageJpa image = new ImageJpa(imageName, idAgency);
@@ -236,7 +244,7 @@ public class ImageService {
                         PutObjectRequest.builder()
                                 .bucket(BUCKET_NAME)
                                 .key(objectName)
-                                .contentType("image/webp")
+                                .contentType(contentType)
                                 .build(),
                         RequestBody.fromBytes(optimizedImage));
                 checkSaved = true;

@@ -59,7 +59,7 @@ public class CategoryService {
 
         Integer progressive = categoryRepository.findMaxPositionByAgency(idAgency);
         if (file != null)
-            addCategory.setImage(fileUtils.uploadImageWithBucket(file, idAgency, idUser, "img"));
+            addCategory.setImage(requireUploaded(fileUtils.uploadImageWithBucket(file, idAgency, idUser, "img")));
         CategoryJpa category = categoryRepository.save(new CategoryJpa(addCategory, idAgency, progressive == null ? 1 : progressive + 1));
 
         List<ProductDto> products = productUtils.findAllByIdCategoryAndDeletedAndIdAgency(category.getId(), idAgency);
@@ -111,7 +111,7 @@ public class CategoryService {
         CategoryJpa category = categoryRepository.findByIdAndIdAgencyAndDeleted(updateCategory.getId(), idAgency, false).orElseThrow();
 
         if (file != null)
-            updateCategory.setImage(fileUtils.uploadImageWithBucket(file, idAgency, idUser, "img"));
+            updateCategory.setImage(requireUploaded(fileUtils.uploadImageWithBucket(file, idAgency, idUser, "img")));
 
         List<LongInteger> listLongInteger = updateCategory.getProducts().stream().map((p) -> {
             LongInteger longInteger = new LongInteger();
@@ -282,4 +282,10 @@ public class CategoryService {
         return 200;
     }
 
+
+    /** Foto non caricata: errore (400) invece di salvare la categoria senza immagine. */
+    private static String requireUploaded(String path) {
+        if (path == null || path.isBlank()) throw new IllegalArgumentException("Caricamento immagine non riuscito");
+        return path;
+    }
 }
