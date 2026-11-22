@@ -25,6 +25,7 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.dao.DuplicateKeyException;
 import com.modules.pushmodule.service.StaffPushNotifier;
+import com.modules.tablemodule.service.TableComandCloser;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.index.Index;
@@ -80,6 +81,8 @@ public class TableSessionService {
     private MongoTemplate mongoTemplate;
     @Autowired(required = false)
     private StaffPushNotifier staffPushNotifier;
+    @Autowired(required = false)
+    private TableComandCloser tableComandCloser;
 
     /** Garantisce al massimo UNA sessione OPEN per tavolo, anche con più istanze/richieste concorrenti. */
     @EventListener(ApplicationReadyEvent.class)
@@ -467,6 +470,15 @@ public class TableSessionService {
     }
 
     public Map<String, Object> closeSession(long tableId, long idAgency) {
+        return closeSession(tableId, idAgency, 0L);
+    }
+
+    /**
+     * Chiusura del tavolo dal cameriere/dashboard (POST /api/tables/{id}/session/close): chiude la sessione, libera il
+     * tavolo e chiude le comande della sessione come /freeAndClose (mai accettate → DELETED, accettate → COMPLETED).
+     * Senza questo passaggio gli ordini QR non ancora accettati restavano in AWAIT su un tavolo ormai libero.
+     */
+    public Map<String, Object> closeSession(long tableId, long idAgency, long idUser) {
         Optional<TableSessionJpa> opt = tableSessionRepository
                 .findByTableIdAndStatus(tableId, SessionStatus.OPEN);
         if (opt.isEmpty()) {
@@ -490,6 +502,7 @@ public class TableSessionService {
             TableDto t = pinned.get();
             boolean occupied = t.isBusy() || (t.getSessionId() != null && !t.getSessionId().isEmpty());
             if (!occupied) return errorResp(404, "SESSION_NOT_FOUND");
+            closeComands(t.getSessionId(), idAgency, idUser);
             freeTableRow(t, idAgency);
             log.info("session close without session document tableId={} idAgency={}", tableId, idAgency);
             Map<String, Object> resp = new LinkedHashMap<>();
@@ -501,14 +514,34 @@ public class TableSessionService {
 
         synchronized (session.getId().intern()) {
             TableSessionJpa fresh = markClosed(session);
+            closeComands(fresh.getId(), idAgency, idUser);
 
             Optional<TableDto> tOpt = tableUtils.findByIdAndIdAgencyAndDeleted(tableId, idAgency);
-            tOpt.ifPresent(t -> freeTableRow(t, idAgency));
+            tOpt.ifPresent(t -> {
+                // tavolo legato a un'altra sessione (es. aperto con il vecchio /takes): chiudo anche quelle comande
+                if (t.getSessionId() != null && !t.getSessionId().equals(fresh.getId())) {
+                    closeComands(t.getSessionId(), idAgency, idUser);
+                }
+                freeTableRow(t, idAgency);
+            });
 
             Map<String, Object> resp = new LinkedHashMap<>();
             resp.put("sessionId", fresh.getId());
             resp.put("status", "CLOSED");
             return resp;
+        }
+    }
+
+    private void closeComands(String sessionId, long idAgency, long idUser) {
+        if (tableComandCloser == null || sessionId == null || sessionId.isBlank()) return;
+        try {
+            TableComandCloser.Result r = tableComandCloser.closeSessionComands(sessionId, idAgency, idUser, "closeSession");
+            if (r.any()) {
+                log.info("session close comands sessionId={} idAgency={} cancelled={} completed={}",
+                        sessionId, idAgency, r.cancelled(), r.completed());
+            }
+        } catch (Exception e) {
+            ErrorLog.logger.error("Errore chiusura comande della sessione " + sessionId, e);
         }
     }
 
@@ -540,6 +573,7 @@ public class TableSessionService {
         if (session == null || session.getIdAgency() != idAgency || session.getStatus() == SessionStatus.CLOSED) return;
         synchronized (session.getId().intern()) {
             markClosed(session);
+            closeComands(session.getId(), idAgency, 0L);
         }
     }
 

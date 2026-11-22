@@ -135,7 +135,10 @@ public class DeliverySlotService {
         }
         SlotKey key = new SlotKey(idAgency, date, time);
         ensureCounter(key, s.getSlotMinutes());
-        Update u = new Update().inc("orders", 1).inc("products", 0);
+        // contatore disallineato dalle consegne attive (rilascio perso): riallineo prima del controllo capienza
+        takeawaySlotService.resyncCounterIfQuiet(COUNTERS, key,
+                countLive(idAgency, date, s.getSlotMinutes()).getOrDefault(time, 0), 0);
+        Update u = new Update().inc("orders", 1).inc("products", 0).currentDate("updatedAt");
         boolean ok = mongoTemplate.findAndModify(
                 new Query(Criteria.where("_id").is(key.id()).and("orders").lt(s.getDeliveriesPerSlot())), u,
                 FindAndModifyOptions.options().returnNew(true), TakeawaySlotCounter.class, COUNTERS) != null;
@@ -151,7 +154,7 @@ public class DeliverySlotService {
             if (when == null) return null;
             SlotKey key = new SlotKey(idAgency, when.toLocalDate(), snap(when.toLocalTime(), s.getSlotMinutes()));
             ensureCounter(key, s.getSlotMinutes());
-            mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(key.id())), new Update().inc("orders", 1),
+            mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(key.id())), new Update().inc("orders", 1).currentDate("updatedAt"),
                     TakeawaySlotCounter.class, COUNTERS);
             return key;
         } catch (Exception e) {
@@ -164,7 +167,7 @@ public class DeliverySlotService {
         if (key == null) return;
         try {
             mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(key.id()).and("orders").gte(1)),
-                    new Update().inc("orders", -1), TakeawaySlotCounter.class, COUNTERS);
+                    new Update().inc("orders", -1).currentDate("updatedAt"), TakeawaySlotCounter.class, COUNTERS);
         } catch (Exception e) {
             ErrorLog.logger.error("Errore rilascio fascia consegna " + key.id(), e);
         }
@@ -182,7 +185,7 @@ public class DeliverySlotService {
             if (when == null) return;
             SlotKey key = new SlotKey(idAgency, when.toLocalDate(), snap(when.toLocalTime(), s.getSlotMinutes()));
             if (toDeleted) release(key);
-            else mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(key.id())), new Update().inc("orders", 1),
+            else mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(key.id())), new Update().inc("orders", 1).currentDate("updatedAt"),
                     TakeawaySlotCounter.class, COUNTERS);
         } catch (Exception e) {
             ErrorLog.logger.error("Errore aggiornamento fascia consegna per cambio stato", e);

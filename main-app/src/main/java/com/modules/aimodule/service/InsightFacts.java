@@ -110,7 +110,7 @@ public final class InsightFacts {
                 .append(" (scontrino medio ").append(euroCents(t.avgTicket())).append(").");
         appendComparisonSentence(s, t, previous, reference);
         peak.ifPresent(p -> s.append(" Il momento più intenso è stato tra le ").append(hourBand(p[0]).replace("–", " e le ")).append('.'));
-        if (!top.isEmpty()) s.append(" Il piatto più richiesto è stato ").append(top.get(0).name())
+        if (!top.isEmpty()) s.append(" Il più richiesto è stato ").append(top.get(0).name())
                 .append(" (").append(portions(top.get(0).quantity())).append(").");
         if (res.any()) s.append(' ').append(res.sentence());
         if (!data.soldOut().isEmpty()) s.append(" Sono andati esauriti: ")

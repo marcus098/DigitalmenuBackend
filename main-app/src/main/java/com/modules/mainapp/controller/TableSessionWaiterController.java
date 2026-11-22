@@ -43,7 +43,7 @@ public class TableSessionWaiterController {
     @PostMapping("/close")
     public ResponseEntity<?> close(@PathVariable long tableId) {
         long idAgency = authUserProvider.getAgencyId();
-        Map<String, Object> resp = tableSessionService.closeSession(tableId, idAgency);
+        Map<String, Object> resp = tableSessionService.closeSession(tableId, idAgency, authUserProvider.getUserId());
         int status = TableSessionService.extractStatus(resp);
         return ResponseEntity.status(status).body(resp);
     }

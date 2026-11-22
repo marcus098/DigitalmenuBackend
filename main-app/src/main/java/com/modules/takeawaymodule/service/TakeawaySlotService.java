@@ -394,6 +394,11 @@ public class TakeawaySlotService {
 
         SlotKey key = new SlotKey(idAgency, date, LocalTime.parse(hhmm, HHMM));
         ensureCounter(key, cfg.getSlotDurationMinutes());
+        // Il contatore è solo il lucchetto atomico: se si è disallineato dalle comande attive (rilascio perso, comande
+        // modificate fuori dai servizi) lo riallineo al conteggio live appena calcolato, così uno slot "pieno" di ordini
+        // annullati non blocca i nuovi ordini.
+        resyncCounterIfQuiet(COUNTERS, key, slot.getOrderCount() - slot.getManualOrders(),
+                slot.getProductCount() - slot.getManualProducts());
 
         // Capacità normale residua al netto degli ordini manuali della dashboard.
         int maxOnlineOrders = slot.getMaxOrders() - slot.getManualOrders();
@@ -415,8 +420,45 @@ public class TakeawaySlotService {
         throw new OrderRejectedException(409, "Lo slot di ritiro selezionato non ha più capacità sufficiente, scegline un altro");
     }
 
+    /** Collezione Mongo dei contatori asporto (vedi {@link TakeawaySlotCounter}). */
+    public static final String COUNTERS = "takeaway_slot_counters";
+    /**
+     * Un contatore modificato negli ultimi secondi può avere una prenotazione "in volo" (incrementata ma comanda non
+     * ancora salvata) che il conteggio live non vede ancora: in quel caso non lo riallineo.
+     */
+    static final long RESYNC_QUIET_MS = 30_000L;
+
+    /**
+     * Riallinea il contatore di uno slot ({@code collection}: asporto o consegna) al numero di comande attive, se diverso
+     * e se nessuno lo ha toccato negli ultimi {@link #RESYNC_QUIET_MS} ms. Update condizionale: una prenotazione
+     * concorrente aggiorna updatedAt e fa fallire il riallineamento (nessuna sovra-prenotazione).
+     * @return true se il contatore è stato corretto
+     */
+    public boolean resyncCounterIfQuiet(String collection, SlotKey key, int liveOrders, int liveProducts) {
+        if (key == null) return false;
+        try {
+            int orders = Math.max(0, liveOrders);
+            int products = Math.max(0, liveProducts);
+            Date quietSince = new Date(System.currentTimeMillis() - RESYNC_QUIET_MS);
+            Query q = new Query(new Criteria().andOperator(
+                    Criteria.where("_id").is(key.id()),
+                    new Criteria().orOperator(Criteria.where("orders").ne(orders), Criteria.where("products").ne(products)),
+                    new Criteria().orOperator(Criteria.where("updatedAt").exists(false), Criteria.where("updatedAt").lt(quietSince))));
+            boolean fixed = mongoTemplate.updateFirst(q, new Update().set("orders", orders).set("products", products),
+                    TakeawaySlotCounter.class, collection).getModifiedCount() > 0;
+            if (fixed) {
+                ErrorLog.logger.warn("Contatore slot " + collection + " " + key.id() + " riallineato alle comande attive: "
+                        + orders + " ordini, " + products + " prodotti");
+            }
+            return fixed;
+        } catch (Exception e) {
+            ErrorLog.logger.error("Errore riallineamento contatore slot " + key.id(), e);
+            return false;
+        }
+    }
+
     private boolean increment(Criteria condition, int products) {
-        Update u = new Update().inc("orders", 1).inc("products", products);
+        Update u = new Update().inc("orders", 1).inc("products", products).currentDate("updatedAt");
         return mongoTemplate.findAndModify(new Query(condition), u,
                 FindAndModifyOptions.options().returnNew(true), TakeawaySlotCounter.class) != null;
     }
@@ -442,7 +484,7 @@ public class TakeawaySlotService {
                     snapToSlotStart(pickup.toLocalTime(), cfg.getSlotDurationMinutes()));
             ensureCounter(key, cfg.getSlotDurationMinutes());
             mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(key.id())),
-                    new Update().inc("orders", 1).inc("products", products), TakeawaySlotCounter.class);
+                    new Update().inc("orders", 1).inc("products", products).currentDate("updatedAt"), TakeawaySlotCounter.class);
             return key;
         } catch (Exception e) {
             ErrorLog.logger.error("Errore registrazione slot asporto idAgency=" + idAgency + " time=" + time, e);
@@ -455,7 +497,7 @@ public class TakeawaySlotService {
         if (key == null) return;
         try {
             mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(key.id()).and("orders").gte(1)),
-                    new Update().inc("orders", -1).inc("products", -products), TakeawaySlotCounter.class);
+                    new Update().inc("orders", -1).inc("products", -products).currentDate("updatedAt"), TakeawaySlotCounter.class);
             mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(key.id()).and("products").lt(0)),
                     new Update().set("products", 0), TakeawaySlotCounter.class);
         } catch (Exception e) {
@@ -485,7 +527,7 @@ public class TakeawaySlotService {
             } else {
                 // solo se il contatore esiste già: altrimenti verrà inizializzato dal conteggio live
                 mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(key.id())),
-                        new Update().inc("orders", 1).inc("products", products), TakeawaySlotCounter.class);
+                        new Update().inc("orders", 1).inc("products", products).currentDate("updatedAt"), TakeawaySlotCounter.class);
             }
         } catch (Exception e) {
             ErrorLog.logger.error("Errore aggiornamento slot asporto per cambio stato", e);

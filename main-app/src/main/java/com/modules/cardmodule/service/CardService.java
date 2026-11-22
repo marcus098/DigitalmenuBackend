@@ -60,6 +60,20 @@ public class CardService {
     private AgencyRepository agencyRepository;
     @Autowired
     private LoyaltySettingsRepository loyaltySettingsRepository;
+    @Autowired
+    private com.modules.stylemodule.repository.StyleRepository styleRepository;
+
+    /** Nome del locale da mostrare al cliente: quello impostato nell'aspetto, altrimenti lo slug dell'agency. */
+    private String displayName(long idAgency, String fallback) {
+        try {
+            return styleRepository.findByIdAgencyAndDeleted(idAgency, false)
+                    .map(st -> st.getRestaurantName())
+                    .filter(n -> n != null && !n.isBlank())
+                    .orElse(fallback);
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
 
     // ── Impostazioni del locale ──────────────────────────────────────────────
 
@@ -418,7 +432,8 @@ public class CardService {
             LoyaltySettingsJpa s = settings(card.getIdAgency());
             if (applyExpiry(card, s, OffsetDateTime.now())) card = cardRepository.save(card);
             CardDto dto = toDto(card, s);
-            String localName = agencyRepository.findByIdAndDeleted(card.getIdAgency(), false).map(AgencyJpa::getName).orElse(null);
+            String slug = agencyRepository.findByIdAndDeleted(card.getIdAgency(), false).map(AgencyJpa::getName).orElse(null);
+            String localName = displayName(card.getIdAgency(), slug);
             return new PublicCardStatus(dto.getCode(), dto.isTypePoints(), dto.getActualValue(), dto.getScope(),
                     dto.getPriceForPoint(), dto.getCreatedAt(), dto.getExpiresAt(),
                     card.isTypePoints() || s == null ? null : s.getStampsPrize(), localName);
@@ -472,14 +487,15 @@ public class CardService {
         AgencyJpa agency = agencyRepository.findByIdAndDeleted(idAgency, false).orElseThrow();
 
         CardDto effective = toDto(card, settings(idAgency));
+        String localName = displayName(idAgency, agency.getName());
         Map<String, String> texts = LanguageEmail.getFidelityCard(
-                "IT", agency.getName(), card.getCode(),
+                "IT", localName, card.getCode(),
                 card.isTypePoints(), effective.getScope(), effective.getPriceForPoint()
         );
 
         Context context = new Context();
         context.setVariable("title",        texts.get("title"));
-        context.setVariable("localeName",   agency.getName());
+        context.setVariable("localeName",   localName);
         context.setVariable("greeting",     texts.get("greeting"));
         context.setVariable("cardCode",     card.getCode());
         context.setVariable("qrCodeUrl",    card.getQrCodeUrl());
