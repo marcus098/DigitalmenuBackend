@@ -29,6 +29,9 @@ public interface PaymentRepository extends JpaRepository<PaymentJpa, Long> {
     List<PaymentJpa> findByComandIdAndStatusInOrderByCreatedAtDesc(String comandId, Collection<String> statuses);
     Optional<PaymentJpa> findByIdAndIdAgency(long id, long idAgency);
     long countByComandId(String comandId);
+    List<PaymentJpa> findByComandIdAndIdAgencyOrderByCreatedAtDesc(String comandId, long idAgency);
+    /** Autorizzazioni ferme da prima di {@code before} (job di incasso di sicurezza), le più vecchie prima. */
+    List<PaymentJpa> findTop200ByStatusAndUpdatedAtLessThanEqualOrderByUpdatedAtAsc(String status, LocalDateTime before);
 
     /** Transizione condizionale: aggiorna solo se lo stato attuale è tra quelli ammessi (0 = già transitato). */
     @Transactional

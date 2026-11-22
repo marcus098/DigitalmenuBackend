@@ -67,6 +67,23 @@ public class PaymentController {
         return wrap(() -> paymentService.refund(paymentId, body != null ? body.getAmountCents() : null));
     }
 
+    /**
+     * "Annulla pagamento": rilascia un'autorizzazione non ancora incassata (nessun addebito, nessuna commissione).
+     * 409 se già incassato (usare il rimborso) o se l'ordine è ancora da approvare (usare il rifiuto).
+     */
+    @PostMapping("/{paymentId}/cancel")
+    @PreAuthorize("hasRole('ROLE_ADMIN')")
+    public ResponseEntity<?> cancelAuthorization(@PathVariable long paymentId) {
+        return wrap(() -> paymentService.cancelAuthorization(paymentId));
+    }
+
+    /** Pagamenti online di una comanda del proprio locale (dettaglio ordine), dal più recente. */
+    @GetMapping("/by-comand/{comandId}")
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN','ROLE_WAITER')")
+    public ResponseEntity<?> getForComand(@PathVariable String comandId) {
+        return ResponseEntity.ok(new DataResponse<>(paymentService.getPaymentsForComand(comandId)));
+    }
+
     // ── Impostazioni prepagamento del locale ───────────────────────────────
 
     @GetMapping("/settings")

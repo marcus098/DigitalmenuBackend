@@ -11,6 +11,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByEmailAndDeleted(String email, boolean deleted);
     Optional<User> findByIdAndDeleted(long id, boolean deleted);
     Optional<User> findByIdAndIdAgencyAndDeleted(long id, long idAgency, boolean deleted);
+
+    List<User> findAllByIdAgencyAndDeletedAndRoleIn(long idAgency, boolean deleted, java.util.Collection<String> roles);
     Optional<User> findByOtpConfirmEmailAndDeleted(String otp, boolean deleted);
     Optional<User> findByOtpConfirmNumberAndDeleted(String otp, boolean deleted);
     Optional<User> findByGeneralOtpAndDeleted(String otp, boolean deleted);

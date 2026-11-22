@@ -1,5 +1,6 @@
 package com.modules.webfluxmodule.models;
 
+import com.modules.common.model.ComandDelivery;
 import com.modules.common.model.ComandType;
 import com.modules.common.model.Order;
 import com.modules.common.model.ProductToOrder;
@@ -36,8 +37,20 @@ public record PublicComandDto(
         /** Autorizzazione annullata dopo il rifiuto: nessun addebito. */
         boolean authorizationCanceled,
         /** Pagamento rimborsato integralmente. */
-        boolean refunded
+        boolean refunded,
+        /** Totale dei prodotti (totalCents = subtotalCents + deliveryFeeCents). */
+        long subtotalCents,
+        /** Tariffa della consegna a domicilio (0 se non a domicilio). */
+        long deliveryFeeCents,
+        /** Consegna a domicilio senza indirizzo/telefono (null se non a domicilio). */
+        PublicDelivery delivery
 ) {
+
+    /** Vista pubblica della consegna: niente indirizzo, citofono, note, coordinate. */
+    public record PublicDelivery(String stage, String paymentChoice, long feeCents, Double distanceKm,
+                                 Boolean cashCollected, String deliveryTime,
+                                 LocalDateTime outForDeliveryAt, LocalDateTime deliveredAt) {}
+
 
     public static PublicComandDto from(ComandReactive c) {
         List<Order> orders = c.getOrders() == null ? List.of() : c.getOrders().stream()
@@ -46,11 +59,16 @@ public record PublicComandDto(
                         o.getProducts() == null ? List.of() : o.getProducts()))
                 .toList();
         Long idTable = c.getIdTable() != null && c.getIdTable() > 0 ? c.getIdTable() : null;
+        long subtotal = totalCents(orders);
+        long fee = c.deliveryFeeCents();
+        ComandDelivery d = c.getDelivery();
+        PublicDelivery pd = d == null ? null : new PublicDelivery(d.getStage(), d.getPaymentChoice(), d.getFeeCents(),
+                d.getDistanceKm(), d.getCashCollected(), c.getTime(), d.getOutForDeliveryAt(), d.getDeliveredAt());
         return new PublicComandDto(c.getId(), c.getType(), c.getStatus(), c.getCreatedAt(), c.getUpdatedAt(),
-                idTable, orders, totalCents(orders), Boolean.TRUE.equals(c.getPaid()),
+                idTable, orders, subtotal + fee, Boolean.TRUE.equals(c.getPaid()),
                 Boolean.TRUE.equals(c.getApprovalRequired()), c.getApprovalDeadline(), c.getRejectReason(),
                 Boolean.TRUE.equals(c.getPaymentAuthorized()), Boolean.TRUE.equals(c.getAuthorizationCanceled()),
-                Boolean.TRUE.equals(c.getRefunded()));
+                Boolean.TRUE.equals(c.getRefunded()), subtotal, fee, pd);
     }
 
     /**

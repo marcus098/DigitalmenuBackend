@@ -90,9 +90,13 @@ class PaymentServiceAuthorizationTest {
         PaymentIntent canceled = new PaymentIntent();
         canceled.setStatus("canceled");
         when(t.stripe.cancelPaymentIntent(creds, "pi_1")).thenReturn(canceled);
+        when(t.repo.updateStatusIfIn(eq(5L), eq(List.of(PaymentService.STATUS_AUTHORIZED)), eq(PaymentService.STATUS_CANCELED), any()))
+                .thenReturn(1);
 
         assertTrue(t.service.cancelOpenIntents("cmd_1"));
-        verify(t.repo).updateStatusIfIn(eq(5L), eq(PaymentService.CANCELABLE_STATUSES), eq(PaymentService.STATUS_CANCELED), any());
+        // AUTHORIZED → CANCELED: autorizzazione rilasciata (nessuna commissione), evento pubblicato una volta
+        verify(t.repo).updateStatusIfIn(eq(5L), eq(List.of(PaymentService.STATUS_AUTHORIZED)), eq(PaymentService.STATUS_CANCELED), any());
+        verify(t.publisher).publishEvent(any(com.modules.mainapp.payment.PaymentAuthorizationVoidedEvent.class));
     }
 
     @Test

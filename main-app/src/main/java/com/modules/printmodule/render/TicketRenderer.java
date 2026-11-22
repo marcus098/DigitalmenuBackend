@@ -62,11 +62,16 @@ public final class TicketRenderer {
             }
             case HOME -> {
                 add(out, HUGE, wrap("DOMICILIO", hugeWidth, 0, 0));
-                if (!pickup.isEmpty()) add(out, CENTER, wrap("Consegna " + pickup, width, 0, 0));
-                if (!customer.isEmpty()) add(out, BOLD, wrap(customer, width, 0, 0));
-                String address = sanitize(d.address());
-                if (!address.isEmpty()) add(out, NORMAL, wrap(address, width, 0, 0));
-                if (!phone.isEmpty()) add(out, NORMAL, wrap("Tel: " + phone, width, 0, 5));
+                TicketData.Delivery del = d.delivery();
+                if (del == null) {
+                    if (!pickup.isEmpty()) add(out, CENTER, wrap("Consegna " + pickup, width, 0, 0));
+                    if (!customer.isEmpty()) add(out, BOLD, wrap(customer, width, 0, 0));
+                    String address = sanitize(d.address());
+                    if (!address.isEmpty()) add(out, NORMAL, wrap(address, width, 0, 0));
+                    if (!phone.isEmpty()) add(out, NORMAL, wrap("Tel: " + phone, width, 0, 5));
+                } else {
+                    renderDelivery(out, d, del, customer, phone, pickup, width, hugeWidth);
+                }
             }
         }
 
@@ -125,6 +130,39 @@ public final class TicketRenderer {
         out.add(NORMAL + "-".repeat(width));
         out.add(NORMAL + leftRight("Articoli: " + totalQty, id.isEmpty() ? "" : "#" + id, width));
         return out;
+    }
+
+    /**
+     * Blocco DOMICILIO: orario grande, cliente, indirizzo, citofono, piano, note, telefono e pagamento
+     * ("PAGATO ONLINE" oppure "DA INCASSARE EUR 23,50 CONTANTI|POS", in negativo).
+     */
+    private static void renderDelivery(List<String> out, TicketData d, TicketData.Delivery del, String customer,
+                                       String phone, String pickup, int width, int hugeWidth) {
+        if (!pickup.isEmpty()) add(out, HUGE, wrap("ORE " + pickup, hugeWidth, 0, 0));
+        if (!customer.isEmpty()) add(out, BOLD, wrap(customer, width, 0, 0));
+        String address = sanitize(d.address());
+        if (!address.isEmpty()) add(out, BOLD, wrap(address, width, 0, 2));
+        String intercom = sanitize(del.intercom());
+        if (!intercom.isEmpty()) add(out, NORMAL, wrap("Citofono: " + intercom, width, 0, 10));
+        String floor = sanitize(del.floor());
+        if (!floor.isEmpty()) add(out, NORMAL, wrap("Piano: " + floor, width, 0, 7));
+        String notes = sanitize(del.notes());
+        if (!notes.isEmpty()) add(out, NORMAL, wrap("Note consegna: " + notes, width, 0, 2));
+        if (!phone.isEmpty()) add(out, NORMAL, wrap("Tel: " + phone, width, 0, 5));
+        if (del.distanceKm() != null) {
+            out.add(NORMAL + String.format(java.util.Locale.ITALY, "Distanza: %.1f km", del.distanceKm()));
+        }
+        if (del.paidOnline()) {
+            add(out, INVERTED, wrap("PAGATO ONLINE", width, 0, 0));
+        } else {
+            String method = "CARD".equals(del.method()) ? "POS" : "CONTANTI";
+            add(out, INVERTED, wrap("DA INCASSARE " + euro(del.toCollectCents()) + " " + method, width, 0, 2));
+        }
+    }
+
+    /** "EUR 23,50" (ASCII: il simbolo dell'euro non è stampabile su tutte le stampanti). */
+    public static String euro(long cents) {
+        return String.format(java.util.Locale.ITALY, "EUR %d,%02d", cents / 100, Math.abs(cents % 100));
     }
 
     // ── Test ─────────────────────────────────────────────────────────────────

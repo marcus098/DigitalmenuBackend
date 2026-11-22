@@ -191,7 +191,7 @@ class SumUpFlowTest {
 
         assertTrue(t.service.cancelOpenIntents("cmd_1"));
         verify(t.sumup).deactivateCheckout(creds, "co_1");
-        verify(t.repo).updateStatusIfIn(eq(9L), anyCollection(), eq(PaymentService.STATUS_CANCELED), any());
+        verify(t.repo).updateStatusIfIn(eq(9L), eq(PaymentService.OPEN_STATUSES), eq(PaymentService.STATUS_CANCELED), any());
     }
 
     @Test

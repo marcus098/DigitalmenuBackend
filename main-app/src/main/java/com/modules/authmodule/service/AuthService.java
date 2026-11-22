@@ -129,6 +129,8 @@ public class AuthService {
             value = value * IS_ADMIN;
         } else if (role.equals(ROLE_WAITER)) {
             value = value * IS_WAITER;
+        } else if (role.equals(ROLE_DELIVERY)) {
+            value = value * IS_DELIVERY;
         } else if (role.equals(ROLE_SUPERADMIN)) {
             value = value * IS_SUPERADMIN;
         }
@@ -144,6 +146,34 @@ public class AuthService {
     }
 
     private static final java.util.Set<String> RESERVED_LOCALNAMES = java.util.Set.of("superadmin");
+
+    /**
+     * Username univoco per un invitato (cameriere, rider, altro titolare): nome locale + numero, libero sia tra i
+     * locali sia tra gli utenti. Prima si controllavano solo i nomi dei locali: dal secondo invitato in poi lo
+     * username si ripeteva e loadUserByUsername falliva ("2 risultati").
+     */
+    String uniqueStaffUsername(String baseName) {
+        String candidate;
+        int count = 1;
+        do {
+            candidate = baseName + count;
+            count++;
+        } while (agencyRepository.existsByNameAndDeleted(candidate, false)
+                || userRepository.findByUsernameAndDeleted(candidate, false).isPresent());
+        return candidate;
+    }
+
+    /** Ruoli invitati con il link waitersUrl e approvati dal titolare: camerieri e rider. */
+    public static boolean isInvitedStaff(String role) {
+        return ROLE_WAITER.equals(role) || ROLE_DELIVERY.equals(role);
+    }
+
+    /** Ruolo richiesto nell'invito: null/vuoto = cameriere, ROLE_DELIVERY = rider, altro = non valido (null). */
+    static Role invitedRole(String requested) {
+        if (requested == null || requested.isBlank() || ROLE_WAITER.equals(requested.trim())) return Role.ROLE_WAITER;
+        if (ROLE_DELIVERY.equals(requested.trim())) return Role.ROLE_DELIVERY;
+        return null;
+    }
 
     private static boolean isSuperadmin(User user) {
         return ROLE_SUPERADMIN.equals(user.getRole());
@@ -219,7 +249,8 @@ public class AuthService {
                 return new DataResponse<>("", new AuthResponse(408, resendOtp, user.getId().toString(), "-1", "-1", "-1", -1, false, null, NO_CHECK));
             }
 
-            if(user.getRole().equals(ROLE_WAITER) && !user.isGeneralConfirmed()){
+            // Camerieri e rider entrano solo dopo l'approvazione del titolare
+            if (isInvitedStaff(user.getRole()) && !user.isGeneralConfirmed()) {
                 return new DataResponse<>("", new AuthResponse(406, "-1", "-1", "-1", "-1", "-1", -1, false, null, NO_CHECK));
             }
 
@@ -346,14 +377,13 @@ public class AuthService {
         if (isAgencyBlocked(agencyJpa) || !agencyJpa.getWaitersUrl().equals(signupWaiter.getCode())) {
             return new DataResponse<>(false);
         }
-        String localname = agencyJpa.getName();
-        boolean exists = true;
-        int count = 1;
-        while (exists) {
-            localname = localname + count;
-            exists = agencyRepository.existsByNameAndDeleted(localname, false);
-            count++;
+        Role role = invitedRole(signupWaiter.getRole());
+        if (role == null) {
+            // nessun altro ruolo (es. ROLE_ADMIN) ottenibile dal link d'invito dei camerieri
+            ErrorLog.logger.warn("signupWaiter: ruolo non ammesso '{}' per agency {}", signupWaiter.getRole(), agencyJpa.getId());
+            return new DataResponse<>(false);
         }
+        String localname = uniqueStaffUsername(agencyJpa.getName());
 
         String optEmail = utilities.generateOtpEmailCode();
         String optPhone = utilities.generateOtpEmailCode();
@@ -364,7 +394,7 @@ public class AuthService {
                 signupWaiter.getLastName(),
                 signupWaiter.getEmail(),
                 passwordEncoder.encode(signupWaiter.getPassword()),
-                Role.ROLE_WAITER,
+                role,
                 agencyJpa.getId(),
                 signupWaiter.getPhone(),
                 optEmail,
@@ -401,14 +431,7 @@ public class AuthService {
         if (isAgencyBlocked(agencyJpa) || !agencyJpa.getWaitersUrl().equals(signupAdmin.getCode())) {
             return false;
         }
-        String localname = agencyJpa.getName();
-        boolean exists = true;
-        int count = 1;
-        while (exists) {
-            localname = localname + count;
-            exists = agencyRepository.existsByNameAndDeleted(localname, false);
-            count++;
-        }
+        String localname = uniqueStaffUsername(agencyJpa.getName());
         User user = new User(
                 localname,
                 signupAdmin.getFirstName(),
@@ -475,7 +498,10 @@ public class AuthService {
         long idUser = authUserProvider.getUserId();
         long idAgency = authUserProvider.getAgencyId();
         ErrorLog.logger.info("Admin {} (agency {}) confirming waiter {}", idUser, idAgency, idInvited);
-        User user = userRepository.findByIdAndIdAgencyAndDeleted(idInvited, idAgency, false).orElseThrow();
+        // Solo camerieri e rider del proprio locale (findBy... con idAgency: niente IDOR su altri locali)
+        User user = userRepository.findByIdAndIdAgencyAndDeleted(idInvited, idAgency, false)
+                .filter(u -> isInvitedStaff(u.getRole()))
+                .orElseThrow();
         if (user.isGeneralConfirmed()) {
             return true;
         }

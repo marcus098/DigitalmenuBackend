@@ -56,6 +56,15 @@ public class AllController {
         }
     }
 
+    /** Rider (ROLE_DELIVERY): solo lo stream SSE e gli endpoint /api/delivery del main-app, niente dashboard/comande → 403. */
+    static final String ROLE_DELIVERY = "ROLE_DELIVERY";
+
+    private Mono<Users> getStaffUser() {
+        return getAuthenticatedUser().flatMap(u -> ROLE_DELIVERY.equals(u.getRole())
+                ? Mono.<Users>error(new ResponseStatusException(HttpStatus.FORBIDDEN, "Accesso negato"))
+                : Mono.just(u));
+    }
+
     private Mono<Users> getAuthenticatedUser() {
         return ReactiveSecurityContextHolder.getContext()
                 .map(SecurityContext::getAuthentication)
@@ -70,7 +79,7 @@ public class AllController {
 
     @GetMapping("/dashboard/getAll")
     public Mono<ListToExport> getAllDashboard() {
-        return getAuthenticatedUser()
+        return getStaffUser()
                 .flatMap(user -> {
                     Long agencyId = user.getId_agency();
                     return allService.getAll(Mono.just(user), agencyId, "", true);
@@ -82,11 +91,11 @@ public class AllController {
     public Flux<ComandReactive> getCompleted(@PathVariable String date) {
         try {
             LocalDate parsedDate = LocalDate.parse(date);
-            return getAuthenticatedUser()
+            return getStaffUser()
                     .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Utente non autenticato")))
                     .flatMapMany(user -> allService.getComandsByStatus(true, LocalDateTime.of(parsedDate, LocalTime.MIDNIGHT), user.getId_agency()))
                     .onErrorResume(ResponseStatusException.class, Flux::error)
-                    .onErrorResume(e -> Flux.empty());
+                    .onErrorResume(e -> !(e instanceof ResponseStatusException), e -> Flux.empty());
         } catch (DateTimeParseException e) {
             return Flux.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Formato data non valido. Usa YYYY-MM-DD."));
         }
@@ -96,11 +105,11 @@ public class AllController {
     public Flux<ComandReactive> getDeleted(@PathVariable String date) {
         try {
             LocalDate parsedDate = LocalDate.parse(date);
-            return getAuthenticatedUser()
+            return getStaffUser()
                     .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Utente non autenticato")))
                     .flatMapMany(user -> allService.getComandsByStatus(false, LocalDateTime.of(parsedDate, LocalTime.MIDNIGHT), user.getId_agency()))
                     .onErrorResume(ResponseStatusException.class, Flux::error)
-                    .onErrorResume(e -> Flux.empty());
+                    .onErrorResume(e -> !(e instanceof ResponseStatusException), e -> Flux.empty());
         } catch (DateTimeParseException e) {
             return Flux.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Formato data non valido. Usa YYYY-MM-DD."));
         }
@@ -108,7 +117,7 @@ public class AllController {
 
     @GetMapping("/comands/table/{tableId}")
     public Flux<ComandReactive> getComandsBySessionId(@PathVariable long tableId) {
-        return getAuthenticatedUser()
+        return getStaffUser()
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Utente non autenticato")))
                 .flatMapMany(user -> allService.getComandsByTableSessionId(tableId, user.getId_agency()));
     }

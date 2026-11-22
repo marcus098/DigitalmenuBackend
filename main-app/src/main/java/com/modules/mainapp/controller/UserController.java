@@ -5,7 +5,9 @@ import com.modules.authmodule.service.AuthService;
 import com.modules.authmodule.service.UserService;
 import com.modules.common.responses.AuthResponse;
 import com.modules.common.responses.DataResponse;
+import com.modules.mainapp.security.CredentialEndpointGuard;
 import com.modules.servletconfiguration.security.JwtService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -22,6 +24,8 @@ public class UserController {
     private JwtService jwtService;
     @Autowired
     private AuthService authService;
+    @Autowired
+    private CredentialEndpointGuard credentialGuard;
 
 
     @GetMapping("/user/check")
@@ -49,27 +53,45 @@ public class UserController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<?> login(@RequestBody LoginUser loginUser) {
+    public ResponseEntity<?> login(@RequestBody LoginUser loginUser, HttpServletRequest request) {
+        // reCAPTCHA v3 + limiti sui tentativi falliti (vedi CredentialEndpointGuard): l'app nativa entra senza token
+        CredentialEndpointGuard.Decision guard =
+                credentialGuard.checkLogin(request, loginUser.getEmailUsername(), loginUser.getRecaptchaToken());
+        if (!guard.allowed()) return ResponseEntity.status(guard.status()).body(guard.body());
+
         DataResponse<AuthResponse> dataResponse = authService.login(loginUser.getEmailUsername(), loginUser.getPassword());
+        AuthResponse auth = dataResponse.getData();
+        if (auth != null) {
+            if (auth.getStatus() == 401) credentialGuard.loginFailed(request, loginUser.getEmailUsername());
+            else credentialGuard.loginSucceeded(loginUser.getEmailUsername());
+        }
         return ResponseEntity.status(dataResponse.getData() == null ? 400 : 200).body(dataResponse.getData());
     }
 
     @PostMapping("/signupAgency")
     public ResponseEntity<?> signupAgency(
             @ModelAttribute SignupAgency signupAgency,
-            @RequestParam(required = false) MultipartFile file
+            @RequestParam(required = false) MultipartFile file,
+            @RequestParam(value = "recaptchaToken", required = false) String recaptchaToken,
+            HttpServletRequest request
     ) {
+        CredentialEndpointGuard.Decision guard =
+                credentialGuard.checkSignup(request, recaptchaToken, CredentialEndpointGuard.ACTION_SIGNUP);
+        if (!guard.allowed()) return ResponseEntity.status(guard.status()).body(guard.body());
         DataResponse<Boolean> registered = authService.signupAgency(signupAgency, file);
         return ResponseEntity.status(registered.getData() ? 200 : 400).body(registered.getData());
     }
 
     @PostMapping("/signupWaiter")
-    public ResponseEntity<?> signupAgency(@RequestBody SignupWaiter signupWaiter) {
+    public ResponseEntity<?> signupAgency(@RequestBody SignupWaiter signupWaiter, HttpServletRequest request) {
+        CredentialEndpointGuard.Decision guard = credentialGuard.checkSignup(
+                request, signupWaiter.getRecaptchaToken(), CredentialEndpointGuard.ACTION_SIGNUP_STAFF);
+        if (!guard.allowed()) return ResponseEntity.status(guard.status()).body(guard.body());
         DataResponse<Boolean> registered = authService.signupWaiter(signupWaiter);
         return ResponseEntity.status(registered.getData() ? 200 : 400).body(registered.getData());
     }
 
-    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER', 'ROLE_DELIVERY')")
     @PostMapping("/users/updateData")
     public ResponseEntity<?> updateUserData(@RequestBody UpdateData updateData) {
         if (!updateData.validate()) {
@@ -80,7 +102,7 @@ public class UserController {
         return ResponseEntity.status(dataResponse.getData() ? 200 : 400).body(dataResponse.getData());
     }
 
-    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER', 'ROLE_DELIVERY')")
     @PostMapping("/users/changePassword")
     public ResponseEntity<?> updateUserData(@RequestBody ChangePassword changePassword) {
         if (!changePassword.validate()) {
@@ -102,7 +124,7 @@ public class UserController {
         return ResponseEntity.ok(authService.confirmPhoneOtpCodeLink(code));
     }
 
-    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER', 'ROLE_DELIVERY')")
     @GetMapping("/users/confirmGeneral/{code}")
     public ResponseEntity<?> confirmGeneral(@PathVariable("code") String code){
         return ResponseEntity.ok(authService.confirmGeneralOtpCodeLink(code));
@@ -111,7 +133,12 @@ public class UserController {
     @PreAuthorize("hasAnyRole('ROLE_ADMIN')")
     @GetMapping("/users/confirmWaiterAdmin/{id}")
     public ResponseEntity<?> confirmWaiterAdmin(@PathVariable("id") long id){
-        return ResponseEntity.ok(authService.confirmWaiterAdminRegistration(id));
+        // Solo camerieri/rider del proprio locale: altrimenti 404 (non riveliamo utenti di altri locali)
+        try {
+            return ResponseEntity.ok(authService.confirmWaiterAdminRegistration(id));
+        } catch (java.util.NoSuchElementException e) {
+            return ResponseEntity.status(404).body(false);
+        }
     }
 
     @PreAuthorize("hasAnyRole('ROLE_ADMIN')")
@@ -141,7 +168,11 @@ public class UserController {
     @PreAuthorize("hasAnyRole('ROLE_ADMIN')")
     @GetMapping("/users/deleteWaiter/{id}")
     public ResponseEntity<?> deleteWaiter(@PathVariable("id") long id){
-        return ResponseEntity.ok(new DataResponse<>(userService.deleteWaiter(id)));
+        try {
+            return ResponseEntity.ok(new DataResponse<>(userService.deleteWaiter(id)));
+        } catch (java.util.NoSuchElementException e) {
+            return ResponseEntity.status(404).body(new DataResponse<>(false));
+        }
     }
 
     @GetMapping("/users/resendEmailVerification/{id}/{code}")

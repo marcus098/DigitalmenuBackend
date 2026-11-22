@@ -2,7 +2,9 @@ package com.modules.printmodule.service;
 
 import com.modules.authmodule.repository.AgencyRepository;
 import com.modules.common.logs.errorlog.ErrorLog;
+import com.modules.common.model.ComandDelivery;
 import com.modules.common.model.ComandType;
+import com.modules.deliverymodule.service.DeliveryOrderService;
 import com.modules.common.model.Order;
 import com.modules.common.model.ProductToOrder;
 import com.modules.common.model.enums.ComandWaiterType;
@@ -94,7 +96,18 @@ public class TicketFactory {
                 c.getCreatedAt(),
                 TicketRenderer.shortId(c.getId()),
                 banner,
-                items));
+                items,
+                deliveryBlock(c)));
+    }
+
+    /** Blocco DOMICILIO (solo comande HOME con snapshot della consegna). */
+    static TicketData.Delivery deliveryBlock(ComandJpa c) {
+        ComandDelivery d = c.getDelivery();
+        if (d == null || c.getComandWaiterType() != ComandWaiterType.HOME) return null;
+        boolean paidOnline = Boolean.TRUE.equals(c.getPaid()) || !d.payOnDelivery();
+        long toCollect = DeliveryOrderService.subtotalCents(c.getOrders()) + c.deliveryFeeCents();
+        return new TicketData.Delivery(d.getIntercom(), d.getFloor(), d.getNotes(), d.getDistanceKm(),
+                d.getFeeCents(), paidOnline, paidOnline ? 0 : toCollect, d.getPaymentChoice());
     }
 
     public static boolean matchesFilter(ProductToOrder p, List<String> filter) {

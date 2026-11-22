@@ -7,6 +7,7 @@ import com.modules.servletconfiguration.security.AuthenticatedUserProvider;
 import com.modules.takeawaymodule.dto.ClosureDto;
 import com.modules.takeawaymodule.dto.PauseStatusDto;
 import com.modules.takeawaymodule.dto.SlotConfigDto;
+import com.modules.takeawaymodule.dto.PublicSlotDto;
 import com.modules.takeawaymodule.dto.SlotDto;
 import com.modules.takeawaymodule.service.TakeawaySlotService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -187,14 +188,14 @@ public class TakeawaySlotController {
     // ── Pubblico (cart cliente) ──────────────────────────────────────────────
 
     @GetMapping("/api/public/takeaway/slots/{localname}/day/{date}")
-    public ResponseEntity<List<SlotDto>> getAvailableForDay(
+    public ResponseEntity<List<PublicSlotDto>> getAvailableForDay(
             @PathVariable("localname") String localname,
             @PathVariable("date") String date) {
         LocalDate d = parseDate(date);
         if (d == null) return ResponseEntity.badRequest().build();
         return userRepository.findByUsernameAndDeleted(localname, false)
-                .map(u -> ResponseEntity.ok(service.getAvailableSlotsForDay(u.getIdAgency(), d,
-                        prepaymentPolicy.requiresPrepayment(u.getIdAgency(), PrepaymentPolicy.Channel.TAKEAWAY))))
+                .map(u -> ResponseEntity.ok(PublicSlotDto.of(service.getAvailableSlotsForDay(u.getIdAgency(), d,
+                        prepaymentPolicy.requiresPrepayment(u.getIdAgency(), PrepaymentPolicy.Channel.TAKEAWAY)))))
                 .orElse(ResponseEntity.notFound().build());
     }
 

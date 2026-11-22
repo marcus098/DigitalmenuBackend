@@ -170,8 +170,12 @@ public class AllService {
         return webfluxTableRepository
                 .findByIdAndIdAgencyAndDeleted(tableId, idAgency, false)
                 .switchIfEmpty(Mono.error(new Exception("Tavolo non trovato o eliminato")))
+                // Tavolo libero (sessionId vuoto): niente query, altrimenti "" pescherebbe asporti e consegne
+                .filter(table -> table.getSessionId() != null && !table.getSessionId().isBlank())
                 .flatMap(table -> webfluxComandRepository.findAllByStatusInAndIdAgencyAndTableSessionId(
                         List.of(
+                                // AWAIT: ordini del tavolo dal QR non ancora accettati
+                                ComandStatus.AWAIT.toString(),
                                 ComandStatus.COMPLETED.toString(),
                                 ComandStatus.PENDING.toString(),
                                 ComandStatus.PROGRESS.toString()

@@ -234,6 +234,18 @@ public class TakeawaySlotService {
         });
     }
 
+    /**
+     * Chiusura dell'intera giornata (giorno chiuso, periodo di chiusura o data straordinaria), riusata dalla consegna
+     * a domicilio: null se aperta, altrimenti il messaggio per il cliente.
+     */
+    public String dayClosedMessage(long idAgency, LocalDate date) {
+        TakeawaySlotConfigJpa cfg = config(idAgency);
+        if (parseClosedDates(cfg.getClosedDates()).contains(date.toString())) return "Il locale è chiuso in questa data";
+        return closureFor(idAgency, date)
+                .map(c -> "Il locale è chiuso in questa data" + (c.getNote() != null ? " (" + c.getNote() + ")" : ""))
+                .orElse(null);
+    }
+
     // ── Internals ────────────────────────────────────────────────────────────
 
     /** Motivo di chiusura dell'intera giornata ("DAY" / "RANGE"), null se aperta. */

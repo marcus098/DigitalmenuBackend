@@ -3,6 +3,7 @@ package com.modules.mainapp.payment.listener;
 import com.modules.common.logs.errorlog.ErrorLog;
 import com.modules.common.model.Comand;
 import com.modules.common.model.enums.ComandStatus;
+import com.modules.mainapp.payment.PaymentAuthorizationVoidedEvent;
 import com.modules.mainapp.payment.PaymentAuthorizedEvent;
 import com.modules.mainapp.payment.PaymentCompletedEvent;
 import com.modules.mainapp.payment.PaymentRefundedEvent;
@@ -12,6 +13,7 @@ import com.modules.ordermodule.kafka.OrderUpdateProducer;
 import com.modules.ordermodule.repository.MongoComandRepository;
 import com.modules.ordermodule.service.OrderComandService;
 import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -30,7 +32,10 @@ import java.time.LocalDateTime;
  *       (stampa + dashboard) tramite {@link OrderComandService#onPaymentCompleted};</li>
  *   <li>{@link PaymentAuthorizedEvent} → ordine "su richiesta" autorizzato: AWAIT_PAYMENT → AWAIT_APPROVAL;</li>
  *   <li>{@link PaymentRefundedEvent} → rimborso totale: paid = false, refunded = true;</li>
- *   <li>{@link ComandStatusChangedEvent} verso DELETED → annulla gli intent Stripe ancora aperti/autorizzati.</li>
+ *   <li>{@link ComandStatusChangedEvent} verso DELETED → annulla gli intent Stripe ancora aperti/autorizzati
+ *       (un'autorizzazione annullata non costa commissioni);</li>
+ *   <li>{@link ComandStatusChangedEvent} verso PROGRESS/COMPLETED → incassa l'autorizzazione della carta;</li>
+ *   <li>{@link PaymentAuthorizationVoidedEvent} → autorizzazione rilasciata: la comanda non risulta più pagata.</li>
  * </ul>
  * Gli eventi di pagamento sono pubblicati dentro la transazione JPA del webhook: i listener girano AFTER_COMMIT
  * (lo stato del pagamento è già persistito), con fallbackExecution per le chiamate fuori transazione (test).
@@ -70,6 +75,17 @@ public class PaymentEventsListener {
                 .set("paymentAuthorized", false)
                 .set("paymentIntentId", event.paymentIntentId());
         long modified = mongoTemplate.updateFirst(query, update, COMAND_COLLECTION).getModifiedCount();
+        if (modified == 0) {
+            // Incasso di un'autorizzazione (carta): la comanda era già "pagata" (garantita), ora è anche incassata
+            Query authorized = new Query(Criteria.where("_id").is(event.comandId()).and("paymentAuthorized").is(true)
+                    .and("paid").is(true));
+            if (mongoTemplate.updateFirst(authorized, new Update().set("paymentAuthorized", false)
+                    .set("paymentIntentId", event.paymentIntentId()), COMAND_COLLECTION).getModifiedCount() > 0) {
+                ErrorLog.logger.info("Comanda {}: autorizzazione incassata ({} cent)", event.comandId(), event.amountCents());
+                mongoComandRepository.findById(event.comandId()).ifPresent(c -> sendPaidEvent(c, true));
+                return;
+            }
+        }
 
         // Prepagamento: AWAIT_PAYMENT → stato iniziale + stampa/dashboard. Idempotente, chiamato anche se paid era
         // già true (un tentativo precedente può essersi interrotto prima della transizione).
@@ -123,6 +139,43 @@ public class PaymentEventsListener {
         Update update = new Update().set("paid", false).set("refunded", true);
         if (mongoTemplate.updateFirst(query, update, COMAND_COLLECTION).getModifiedCount() == 0) return;
         mongoComandRepository.findById(event.comandId()).ifPresent(c -> sendPaidEvent(c, false));
+    }
+
+    /**
+     * Autorizzazione (non incassata) annullata o scaduta per una comanda già partita come "pagata" (carta garantita):
+     * la comanda non risulta più pagata online, va incassata in altro modo (o era stata annullata).
+     * Le comande "su richiesta" rifiutate (paid = false) non vengono toccate.
+     */
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void onAuthorizationVoided(PaymentAuthorizationVoidedEvent event) {
+        if (event.comandId() == null || event.comandId().isBlank()) return;
+        Query query = new Query(Criteria.where("_id").is(event.comandId()).and("paymentAuthorized").is(true)
+                .and("paid").is(true));
+        Update update = new Update().set("paid", false).set("paymentAuthorized", false).set("authorizationCanceled", true);
+        if (mongoTemplate.updateFirst(query, update, COMAND_COLLECTION).getModifiedCount() == 0) return;
+        mongoComandRepository.findById(event.comandId()).ifPresent(c -> {
+            if (c.getStatus() != ComandStatus.DELETED) {
+                ErrorLog.logger.warn("Comanda {} ({}): autorizzazione di {} cent annullata/scaduta ma ordine attivo: "
+                        + "non risulta più pagato online", c.getId(), c.getStatus(), event.amountCents());
+            }
+            sendPaidEvent(c, false);
+        });
+    }
+
+    /**
+     * Il locale prende in carico la comanda (In preparazione / Completata, anche dalla cassa): si incassa
+     * l'autorizzazione della carta. Asincrono: il cambio stato dello staff non aspetta Stripe. Idempotente (capture
+     * con idempotency key; nessuna autorizzazione aperta = nulla da fare). Se fallisce ci riprova il job.
+     */
+    @Async
+    @EventListener
+    public void onComandAccepted(ComandStatusChangedEvent event) {
+        if (event.newStatus() != ComandStatus.PROGRESS && event.newStatus() != ComandStatus.COMPLETED) return;
+        try {
+            paymentService.captureOnAcceptance(event.comandId());
+        } catch (Exception e) {
+            ErrorLog.logger.error("Errore incasso autorizzazione per comanda presa in carico {}", event.comandId(), e);
+        }
     }
 
     @EventListener

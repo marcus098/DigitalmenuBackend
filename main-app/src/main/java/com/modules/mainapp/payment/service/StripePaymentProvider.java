@@ -25,7 +25,8 @@ import static com.modules.mainapp.payment.service.PaymentService.STATUS_PENDING;
 
 /**
  * Stripe sull'account DEL LOCALE (chiavi del locale): addebito diretto, nessun on_behalf_of / transfer_data /
- * application fee. Ordini nella riserva: capture manuale (autorizzazione, incasso all'approvazione).
+ * application fee. Ordini nella riserva: capture manuale (autorizzazione, incasso all'approvazione). Altri ordini:
+ * capture manuale per le sole carte (incasso alla presa in carico, vedi {@link PaymentService#captureAuthorized}).
  */
 @Component
 public class StripePaymentProvider implements OnlinePaymentProvider {
@@ -105,6 +106,16 @@ public class StripePaymentProvider implements OnlinePaymentProvider {
             // Ordine nella riserva: si autorizza soltanto, l'incasso avviene all'approvazione del locale
             params.setCaptureMethod(PaymentIntentCreateParams.CaptureMethod.MANUAL)
                     .putMetadata("approvalRequired", "true");
+        } else {
+            // Carte (anche Apple Pay / Google Pay): solo autorizzazione, incasso quando il locale prende in carico
+            // l'ordine. Annullare un'autorizzazione non costa commissioni, un rimborso dopo l'incasso sì.
+            // Gli altri metodi (che non supportano l'incasso separato) restano a capture automatica.
+            params.setPaymentMethodOptions(PaymentIntentCreateParams.PaymentMethodOptions.builder()
+                            .setCard(PaymentIntentCreateParams.PaymentMethodOptions.Card.builder()
+                                    .setCaptureMethod(PaymentIntentCreateParams.PaymentMethodOptions.Card.CaptureMethod.MANUAL)
+                                    .build())
+                            .build())
+                    .putMetadata("cardHold", "true");
         }
         return params.build();
     }
@@ -115,7 +126,7 @@ public class StripePaymentProvider implements OnlinePaymentProvider {
         String ref = accountRef(creds);
         // Deterministica per (comanda, importo, account, modalità, n. tentativi): un doppio click non crea due intent
         String idempotencyKey = "pi-" + req.comandId() + "-" + req.amountCents() + "-" + req.currency() + "-" + ref
-                + (req.approvalRequired() ? "-manual" : "") + "-" + req.attempt();
+                + (req.approvalRequired() ? "-manual" : "-cardhold") + "-" + req.attempt();
         try {
             PaymentIntent intent = stripe.createPaymentIntent(creds, buildParams(req), idempotencyKey);
             PaymentIntentResponse resp = new PaymentIntentResponse.Stripe(intent.getClientSecret(), intent.getId(),

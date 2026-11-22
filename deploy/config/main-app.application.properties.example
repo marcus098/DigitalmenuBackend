@@ -120,3 +120,58 @@ spring.thymeleaf.mode=HTML
 spring.thymeleaf.cache=true
 
 logging.level.org.springframework.security=INFO
+
+# ── Consegna a domicilio (docs/DOMICILIO.md) ─────────────────────────────────
+# Verifica del telefono via SMS con Prelude Verify (https://prelude.so). Chiave SOLO lato server: passala con la
+# variabile d'ambiente PRELUDE_API_KEY (docker-compose -> main-app). Vuota = verifica del telefono DISATTIVATA:
+# consegna a domicilio e asporto accettano il numero senza codice SMS (viene solo validato).
+prelude.api-key=${PRELUDE_API_KEY:}
+# false = verifica SMS spenta anche con la chiave impostata (nessun SMS, ordini senza codice). Predefinito true:
+# la verifica è attiva solo se gli SMS sono disponibili (chiave Prelude o dev-mode locale).
+app.otp.enabled=${APP_OTP_ENABLED:true}
+prelude.base-url=https://api.prelude.dev
+# Facoltativo: canale preferito (sms, whatsapp, rcs, viber, telegram). Vuoto = instradamento automatico di Prelude.
+prelude.preferred-channel=${PRELUDE_PREFERRED_CHANNEL:}
+# In produzione SEMPRE false. Anche se impostata a true viene disattivata (ERROR nel log) quando il backend non è
+# locale (app.public-base-url non localhost, server.forward-headers-strategy impostato o profilo prod/staging).
+app.otp.dev-mode=false
+# Segreto HMAC dei phoneToken (90 giorni). Vuoto = derivato da jwt.application.key. Cambiarlo invalida i token.
+app.otp.token-secret=
+# Limiti anti "SMS pumping" (prima di chiamare Prelude)
+app.otp.rate-limit.send.ip.max-attempts=5
+app.otp.rate-limit.send.ip.window-minutes=120
+app.otp.rate-limit.send.phone.max-attempts=3
+app.otp.rate-limit.send.phone.window-minutes=15
+app.otp.rate-limit.send.venue.max-per-day=200
+app.otp.rate-limit.send.global.max-per-day=2000
+app.otp.rate-limit.check.max-attempts=5
+app.otp.rate-limit.check.window-minutes=30
+# Geocodifica: proxy verso Nominatim (OpenStreetMap), max 1 richiesta/s, con cache. Contatto obbligatorio per la policy.
+app.geo.nominatim.base-url=https://nominatim.openstreetmap.org
+app.geo.nominatim.contact-email=REPLACE_ME
+app.geo.nominatim.user-agent=RestaurantFlow/1.0
+
+# ── Google reCAPTCHA v3 su login e registrazioni ─────────────────────────────
+# Chiavi da https://www.google.com/recaptcha/admin (tipo "Basato sul punteggio (v3)"). La site key (pubblica) va nel
+# frontend (REACT_APP_RECAPTCHA_SITE_KEY), il secret SOLO qui o con la variabile d'ambiente RECAPTCHA_SECRET.
+# Secret vuoto = verifica disattivata (sviluppo locale). Configura sempre ENTRAMBE le chiavi o nessuna: con il secret
+# valorizzato e il frontend senza site key, il login dal browser risponde 403.
+# Il token arriva nel corpo della richiesta, campo "recaptchaToken" (azioni: login, signup, signup_staff).
+# L'app nativa (DineUp Sala) fa login senza token: resta soggetta ai limiti app.login.attempts.* qui sotto.
+app.recaptcha.secret=${RECAPTCHA_SECRET:}
+# Score minimo (0.0 = bot, 1.0 = umano)
+app.recaptcha.min-score=0.5
+app.recaptcha.timeout-ms=3000
+# Google irraggiungibile (timeout/errore): true = si accetta la richiesta (restano i limiti sui tentativi),
+# false = si rifiuta (403). Un secret rifiutato da Google conta come "irraggiungibile" (ERROR nel log).
+app.recaptcha.fail-open=true
+# Facoltativo: hostname ammessi nel token (es. app.example.com), separati da virgola. Vuoto = nessun controllo.
+app.recaptcha.allowed-hostnames=
+# Tentativi di login falliti, finestra scorrevole in memoria (per istanza). 0 = regola disattivata.
+app.login.attempts.window-minutes=15
+# Oltre queste soglie anche le richieste senza browser (app) devono presentare il captcha -> l'app riceve 429
+app.login.attempts.captcha-after-ip-failures=5
+app.login.attempts.captcha-after-account-failures=5
+# Blocco temporaneo (429): per IP sempre; per account solo se la richiesta non ha un captcha valido
+app.login.attempts.block-after-ip-failures=30
+app.login.attempts.block-after-account-failures=10

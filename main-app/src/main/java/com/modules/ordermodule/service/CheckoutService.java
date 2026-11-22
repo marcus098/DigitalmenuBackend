@@ -77,6 +77,7 @@ public class CheckoutService {
         co.setDiscountPct("PCT".equals(req.discountMode()) ? req.discountPct() : null);
         co.setCardDiscountCents(req.cardDiscountCents());
         co.setCardId(req.cardId());
+        co.setPaymentMethod(req.normalizedPaymentMethod());
         co.setPaidOnline(Boolean.TRUE.equals(comand.getPaid()));
         co.setClosedAt(LocalDateTime.now());
         co.setClosedBy(idUser);
@@ -125,6 +126,30 @@ public class CheckoutService {
                 .with(org.springframework.data.domain.Sort.by("createdAt"))
                 .limit(200);
         return mongoTemplate.find(q, ComandJpa.class, ComandStatusUpdater.COLLECTION);
+    }
+
+    /** Riga dello storico cassa: una chiusura conto. */
+    public record CheckoutEntry(String comandId, Long idTable, String name, String type, long subtotalCents, long discountCents,
+                                long totalCents, String paymentMethod, boolean paidOnline, LocalDateTime closedAt) {}
+
+    /** Conti chiusi in cassa nel periodo (estremi inclusi), dal più recente. */
+    public List<CheckoutEntry> history(LocalDate from, LocalDate to) {
+        long idAgency = auth.getAgencyId();
+        ZoneId server = ZoneId.systemDefault();
+        LocalDateTime start = from.atStartOfDay(BUSINESS_ZONE).withZoneSameInstant(server).toLocalDateTime();
+        LocalDateTime end = to.plusDays(1).atStartOfDay(BUSINESS_ZONE).withZoneSameInstant(server).toLocalDateTime();
+        Query q = new Query(Criteria.where("idAgency").is(idAgency).and("checkout.closedAt").gte(start).lt(end))
+                .with(org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "checkout.closedAt"))
+                .limit(5000);
+        List<CheckoutEntry> out = new ArrayList<>();
+        for (ComandJpa c : mongoTemplate.find(q, ComandJpa.class, ComandStatusUpdater.COLLECTION)) {
+            ComandCheckout co = c.getCheckout();
+            if (co == null || co.getClosedAt() == null) continue;
+            out.add(new CheckoutEntry(c.getId(), c.getIdTable(), c.getName(), c.getType() == null ? null : c.getType().name(),
+                    co.getSubtotalCents(), co.getDiscountCents(), co.getTotalCents(), co.getPaymentMethod(),
+                    co.isPaidOnline(), co.getClosedAt()));
+        }
+        return out;
     }
 
     /** Incasso di cassa di un giorno. totalCents esclude le comande già pagate online (già nei pagamenti). */

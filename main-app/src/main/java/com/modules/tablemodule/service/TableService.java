@@ -9,6 +9,7 @@ import com.modules.common.model.enums.ComandStatus;
 import com.modules.common.model.enums.LogOperation;
 import com.modules.common.model.enums.TypeEntity;
 import com.modules.common.utilities.Utilities;
+import com.modules.ordermodule.event.ComandStatusChangedEvent;
 import com.modules.servletconfiguration.security.AuthenticatedUserProvider;
 import com.modules.tablemodule.model.TableEntityJpa;
 import com.modules.tablemodule.repository.mongo.MongoTableRepository;
@@ -18,6 +19,7 @@ import com.modules.tablemodule.requests.UpdateTableRow;
 import com.modules.tablemodule.requests.UpdateTables;
 import jakarta.transaction.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
@@ -35,6 +37,8 @@ public class TableService {
     private static final List<String> OPEN_COMAND_STATUS_NAMES =
             OPEN_COMAND_STATUSES.stream().map(ComandStatus::toString).toList();
     @Autowired
+    private ApplicationEventPublisher eventPublisher;
+    @Autowired
     private TableEntityRepository tableEntityRepository;
     @Autowired
     private MongoTableRepository mongoTableRepository;
@@ -44,6 +48,17 @@ public class TableService {
     private OrderUtils orderUtils;
     @Autowired
     private Utilities utilities;
+
+    /**
+     * Comande aperte della sessione corrente del tavolo. Un tavolo mai aperto (o liberato) non ha sessione:
+     * senza questo controllo la query su tableSessionId null/vuoto pescherebbe comande di asporto/consegna
+     * (che non hanno sessione) o documenti non legati al tavolo, bloccando l'eliminazione.
+     */
+    List<Comand> findOpenComands(TableEntityJpa table, long idAgency) {
+        String sessionId = table.getSessionId();
+        if (sessionId == null || sessionId.isBlank()) return List.of();
+        return orderUtils.findByTableSessionIdAndIdAgencyAndStatusIn(sessionId, idAgency, OPEN_COMAND_STATUS_NAMES);
+    }
 
     @Transactional
     public TableDto addTable(AddTable addTable) {
@@ -120,8 +135,9 @@ public class TableService {
                     UpdateTableRow updateTableRow = map.get(tableEntityJpa.getId());
                     tableEntityJpa.setX(updateTableRow.getX());
                     tableEntityJpa.setY(updateTableRow.getY());
-                    tableEntityJpa.setW(updateTableRow.getW());
-                    tableEntityJpa.setH(updateTableRow.getH());
+                    // Mai salvare dimensioni nulle (tavolo invisibile): si tiene quella attuale o il default 3x3
+                    tableEntityJpa.setW(updateTableRow.getW() > 0 ? updateTableRow.getW() : (tableEntityJpa.getW() > 0 ? tableEntityJpa.getW() : 3));
+                    tableEntityJpa.setH(updateTableRow.getH() > 0 ? updateTableRow.getH() : (tableEntityJpa.getH() > 0 ? tableEntityJpa.getH() : 3));
                 }
             }
 
@@ -169,11 +185,11 @@ public class TableService {
 
             TableEntityJpa table = tableEntityJpa.get();
             //cerco su mongodb se ci sono comande associate al tavolo
-            List<Comand> comands = orderUtils.findByTableSessionIdAndIdAgencyAndStatusIn(table.getSessionId(), idAgency, OPEN_COMAND_STATUS_NAMES);
+            List<Comand> comands = findOpenComands(table, idAgency);
 
-            // se ci sono comande mando errore 402
+            // se ci sono comande aperte: 409 (conflitto)
             if (!comands.isEmpty()) {
-                return 402;
+                return 409;
             }
 
             // se la lista e' vuota posso eliminare
@@ -208,7 +224,7 @@ public class TableService {
 
             TableEntityJpa table = tableEntityJpa.get();
             // cerco su mongodb le comande associate al tavolo
-            List<Comand> comands = orderUtils.findByTableSessionIdAndIdAgencyAndStatusIn(table.getSessionId(), idAgency, OPEN_COMAND_STATUS_NAMES);
+            List<Comand> comands = findOpenComands(table, idAgency);
             List<EntityLog<?>> comandLogs = new ArrayList<>();
 
             // segno come completate tutte le comande e le salvo su mongo
@@ -258,20 +274,33 @@ public class TableService {
             }
             TableEntityJpa table = tableEntityJpa.get();
             // cerco su mongodb le comande attive associate al tavolo
-            List<Comand> comands = orderUtils.findByTableSessionIdAndIdAgencyAndStatusIn(table.getSessionId(), idAgency, OPEN_COMAND_STATUS_NAMES);
+            List<Comand> comands = findOpenComands(table, idAgency);
             List<EntityLog<?>> comandLogs = new ArrayList<>();
 
-            // segno come completate tutte le comande e le salvo su mongo
+            // Le comande mai accettate dalla sala (AWAIT, ordini da QR) vengono annullate: la cucina non le ha mai prese
+            // e non devono finire in Cassa da incassare. Le altre (accettate o in cucina) vengono segnate come completate.
             if (!comands.isEmpty()) {
+                List<String> toComplete = new ArrayList<>();
+                List<String> toCancel = new ArrayList<>();
                 for (Comand comand : comands) {
                     ComandStatus oldStatus = comand.getStatus();
-                    comand.setStatus(ComandStatus.COMPLETED);
-                    EntityLog<?> newLog = new EntityLog<>(LogOperation.OTHER, oldStatus, ComandStatus.COMPLETED, "function setBusyAndCloseComands for comand " + comand.getId(), idUser, idAgency);
+                    ComandStatus newStatus = oldStatus == ComandStatus.AWAIT ? ComandStatus.DELETED : ComandStatus.COMPLETED;
+                    (newStatus == ComandStatus.DELETED ? toCancel : toComplete).add(comand.getId());
+                    comand.setStatus(newStatus);
+                    EntityLog<?> newLog = new EntityLog<>(LogOperation.OTHER, oldStatus, newStatus, "function setBusyAndCloseComands for comand " + comand.getId(), idUser, idAgency);
                     comandLogs.add(newLog);
                 }
                 // update condizionale (solo status): non sovrascrive paid/paymentIntentId scritti dal webhook
-                orderUtils.updateStatusIfIn(comands.stream().map(Comand::getId).toList(), idAgency,
-                        OPEN_COMAND_STATUSES, ComandStatus.COMPLETED);
+                if (!toComplete.isEmpty()) {
+                    orderUtils.updateStatusIfIn(toComplete, idAgency, OPEN_COMAND_STATUSES, ComandStatus.COMPLETED);
+                }
+                if (!toCancel.isEmpty()) {
+                    orderUtils.updateStatusIfIn(toCancel, idAgency, List.of(ComandStatus.AWAIT), ComandStatus.DELETED);
+                    // annulla eventuali pagamenti autorizzati e non incassati (PaymentEventsListener)
+                    for (String id : toCancel) {
+                        eventPublisher.publishEvent(new ComandStatusChangedEvent(id, String.valueOf(idAgency), ComandStatus.AWAIT, ComandStatus.DELETED));
+                    }
+                }
                 orderUtils.saveAllLogs(comandLogs);
             }
 
@@ -321,7 +350,7 @@ public class TableService {
 
             if(!setBusy) {
                 //cerco su mongodb se ci sono comande associate al tavolo
-                List<Comand> comands = orderUtils.findByTableSessionIdAndIdAgencyAndStatusIn(table.getSessionId(), idAgency, OPEN_COMAND_STATUS_NAMES);
+                List<Comand> comands = findOpenComands(table, idAgency);
 
                 // se ci sono comande mando errore 402
                 if (!comands.isEmpty()) {

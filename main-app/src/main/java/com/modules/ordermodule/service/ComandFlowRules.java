@@ -27,9 +27,9 @@ public final class ComandFlowRules {
         return slotStart.isBefore(byWindow) ? slotStart : byWindow;
     }
 
-    /** Stato iniziale "normale" del canale (quello che fa partire stampa e dashboard). */
+    /** Stato iniziale "normale" del canale (quello che fa partire stampa e dashboard): asporto e domicilio PENDING. */
     public static ComandStatus initialStatus(ComandWaiterType type) {
-        return type == ComandWaiterType.TAKE_AWAY ? ComandStatus.PENDING : ComandStatus.AWAIT;
+        return type == ComandWaiterType.TAKE_AWAY || type == ComandWaiterType.HOME ? ComandStatus.PENDING : ComandStatus.AWAIT;
     }
 
     /** Stato dopo il prepagamento (capture automatica): ordini nella riserva vanno comunque in approvazione. */

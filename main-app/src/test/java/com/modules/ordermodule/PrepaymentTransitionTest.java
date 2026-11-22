@@ -108,4 +108,31 @@ class PrepaymentTransitionTest {
         verify(publisher, never()).publishEvent(any(ComandCreatedEvent.class));
         verify(kafka, times(1)).sendUpdate(eq(7L), contains("\"status\":\"AWAIT_APPROVAL\""));
     }
+
+    @Test
+    void authorizedCardOrderStartsAsPaidAndUncapturedOnlyOnce() {
+        when(reads.findById("cmd_1"))
+                .thenReturn(Optional.of(comand(ComandStatus.AWAIT_PAYMENT, ComandWaiterType.TAKE_AWAY, null)))
+                .thenReturn(Optional.of(comand(ComandStatus.PENDING, ComandWaiterType.TAKE_AWAY, null)));
+        when(updater.compareAndSet(eq("cmd_1"), isNull(), eq(List.of(ComandStatus.AWAIT_PAYMENT)),
+                eq(ComandStatus.PENDING), any())).thenReturn(true);
+
+        assertTrue(service.onPaymentAuthorized("cmd_1", "pi_1"));
+        assertFalse(service.onPaymentAuthorized("cmd_1", "pi_1")); // webhook ripetuto
+
+        // Carta autorizzata (incasso differito): parte subito come ordine pagato, con stampa, una sola volta
+        verify(publisher, times(1)).publishEvent(new ComandCreatedEvent("cmd_1", "7"));
+        verify(kafka, times(1)).sendUpdate(eq(7L), contains("\"status\":\"PENDING\""));
+        verify(updater, never()).compareAndSet(any(), any(), any(), eq(ComandStatus.AWAIT_APPROVAL), any());
+    }
+
+    @Test
+    void authorizedCardTableOrderGoesToAwait() {
+        when(reads.findById("cmd_1"))
+                .thenReturn(Optional.of(comand(ComandStatus.AWAIT_PAYMENT, ComandWaiterType.TABLE, false)));
+        when(updater.compareAndSet(eq("cmd_1"), isNull(), any(), eq(ComandStatus.AWAIT), any())).thenReturn(true);
+
+        assertTrue(service.onPaymentAuthorized("cmd_1", "pi_1"));
+        verify(publisher).publishEvent(new ComandCreatedEvent("cmd_1", "7"));
+    }
 }

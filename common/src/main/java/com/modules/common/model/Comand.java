@@ -34,8 +34,21 @@ public abstract class Comand {
     private Boolean refunded;
     /** Chiusura del conto in cassa (null = non ancora chiuso in cassa). */
     private ComandCheckout checkout;
+    /** Consegna a domicilio (solo comande HOME create dal canale domicilio o dal cameriere); null altrimenti. */
+    private ComandDelivery delivery;
+    /** Operatore dello staff che ha inserito la comanda (null = ordine del cliente). */
+    private ComandTakenBy takenBy;
 
     public Comand() {}
+
+    public ComandTakenBy getTakenBy() { return takenBy; }
+    public void setTakenBy(ComandTakenBy takenBy) { this.takenBy = takenBy; }
+
+    public ComandDelivery getDelivery() { return delivery; }
+    public void setDelivery(ComandDelivery delivery) { this.delivery = delivery; }
+
+    /** Tariffa di consegna in centesimi (0 se la comanda non è a domicilio). */
+    public long deliveryFeeCents() { return delivery == null ? 0 : Math.max(0, delivery.getFeeCents()); }
 
     public ComandCheckout getCheckout() { return checkout; }
     public void setCheckout(ComandCheckout checkout) { this.checkout = checkout; }

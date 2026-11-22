@@ -82,6 +82,8 @@ public class AggregatingKafkaConsumer {
             projected.put("idAgency", agencyId);
             // flag di pagamento online (non sensibile): permette alle dashboard di aggiornare badge/cassa
             if (event.get("paid") instanceof Boolean paid) projected.put("paid", paid);
+            // stage della consegna a domicilio (PREPARING / OUT_FOR_DELIVERY / DELIVERED): non sensibile
+            if (event.get("deliveryStage") instanceof String stage) projected.put("deliveryStage", stage);
             event = projected;
             ordersByAgency.computeIfAbsent(agencyId, k -> new ArrayList<>()).add(event);
         }

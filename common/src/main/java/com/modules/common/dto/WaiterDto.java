@@ -17,6 +17,12 @@ public class WaiterDto {
     /** Approvato dal titolare (null quando non rilevante, es. negli eventi in tempo reale) */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private Boolean confirmed;
+    /** ROLE_WAITER o ROLE_DELIVERY (rider); null negli eventi in tempo reale. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String role;
+
+    public String getRole() { return role; }
+    public void setRole(String role) { this.role = role; }
 
     public WaiterDto(){
 

@@ -6,7 +6,13 @@ package com.modules.ordermodule.service;
  */
 public interface PrepaymentPolicy {
 
-    enum Channel { TAKEAWAY, TABLE }
+    /** DELIVERY: consegna a domicilio con modalità ONLINE_REQUIRED (vedi docs/DOMICILIO.md). */
+    enum Channel { TAKEAWAY, TABLE, DELIVERY }
 
     boolean requiresPrepayment(long idAgency, Channel channel);
+
+    /** Pagamento online possibile per il locale (provider attivo): serve alla scelta ONLINE della consegna. */
+    default boolean onlinePaymentAvailable(long idAgency) {
+        return false;
+    }
 }

@@ -5,6 +5,7 @@ import com.modules.common.dto.CategoryDto;
 import com.modules.common.dto.IngredientDto;
 import com.modules.common.dto.ProductDto;
 import com.modules.common.dto.TableDto;
+import com.modules.common.dto.UserDto;
 import com.modules.common.finders.CategoryUtils;
 import com.modules.common.finders.IngredientUtils;
 import com.modules.common.finders.ProductUtils;
@@ -34,6 +35,8 @@ import com.modules.ordermodule.request.AddComandOrder;
 import com.modules.ordermodule.request.AddComandWaiter;
 import com.modules.ordermodule.request.AddProductToOrder;
 import com.modules.pushmodule.service.StaffPushNotifier;
+import com.modules.deliverymodule.service.DeliveryOrderService;
+import com.modules.deliverymodule.service.DeliverySlotService;
 import com.modules.servletconfiguration.security.AuthenticatedUserProvider;
 import com.modules.takeawaymodule.service.TakeawaySlotService;
 import jakarta.persistence.EntityNotFoundException;
@@ -105,6 +108,12 @@ public class OrderComandService {
     /** Push ai dispositivi dello staff (app "Sala"); assente nei test unitari. */
     @Autowired(required = false)
     private StaffPushNotifier staffPushNotifier;
+    /** Fasce della consegna a domicilio (comande HOME); assente nei test unitari. */
+    @Autowired(required = false)
+    private DeliverySlotService deliverySlotService;
+    /** Lazy: DeliveryOrderService dipende da questo service. */
+    @Autowired(required = false)
+    private ObjectProvider<DeliveryOrderService> deliveryOrderService;
 
     /** Esito della creazione di una comanda pubblica: AWAIT_PAYMENT = il cliente deve pagare subito. */
     public record CreationResult(String id, ComandStatus status) {
@@ -122,10 +131,12 @@ public class OrderComandService {
 
     public String addOrderWaiter(AddComandWaiter addComandWaiter) {
         TakeawaySlotService.SlotKey slotKey = null;
+        TakeawaySlotService.SlotKey deliverySlotKey = null;
         int slotProducts = 0;
         boolean saved = false;
         try {
-            long idUser = authUserProvider.getUserId();
+            UserDto me = authUserProvider.getAuthenticatedUser();
+            long idUser = me.getId();
             long idAgency = authUserProvider.getAgencyId();
 
             String comandId = UUID.randomUUID().toString() + "_" + System.currentTimeMillis();
@@ -149,9 +160,15 @@ public class OrderComandService {
                     }
                     comand = new ComandFromWaiterJpa(idAgency, addComandWaiter.getIdTable(), idUser, ComandStatus.PROGRESS, orders, tableSessionId);
                 }
-                case HOME -> comand = new ComandFromWaiterJpa(idAgency, idUser, ComandStatus.PROGRESS, orders,
-                        addComandWaiter.getName(), addComandWaiter.getAddress(),
-                        addComandWaiter.getTime(), addComandWaiter.getPhone());
+                case HOME -> {
+                    comand = new ComandFromWaiterJpa(idAgency, idUser, ComandStatus.PROGRESS, orders,
+                            addComandWaiter.getName(), addComandWaiter.getAddress(),
+                            addComandWaiter.getTime(), addComandWaiter.getPhone());
+                    // Stesso modello della consegna dal menu cliente: snapshot + fascia occupata (senza controllo capacità)
+                    DeliveryOrderService dos = deliveryOrderService != null ? deliveryOrderService.getIfAvailable() : null;
+                    if (dos != null) comand.setDelivery(dos.forWaiter(idAgency, addComandWaiter, orders));
+                    if (deliverySlotService != null) deliverySlotKey = deliverySlotService.consume(idAgency, addComandWaiter.getTime());
+                }
 
                 case TAKE_AWAY -> {
                     comand = new ComandFromWaiterJpa(idAgency, idUser, ComandStatus.PROGRESS, orders,
@@ -168,6 +185,9 @@ public class OrderComandService {
 
             //comand.setId(comandId);
             comand.setComandWaiterType(addComandWaiter.getComandWaiterType());
+            // Chi ha preso l'ordine: dall'utente autenticato, mai dal payload
+            comand.setTakenBy(new ComandTakenBy(idUser,
+                    ComandTakenBy.displayName(me.getName(), me.getSurname(), me.getUsername())));
             Comand comand1 = (ComandFromWaiterJpa) mongoComandRepository.save(comand);
             saved = true;
 
@@ -181,13 +201,18 @@ public class OrderComandService {
             return comand1.getId();
         } catch (OrderRejectedException e) {
             // Payload non valido (es. variante esaurita): il messaggio arriva al cameriere
-            if (!saved) takeawaySlotService.releaseSlot(slotKey, slotProducts);
+            if (!saved) releaseWaiterSlots(slotKey, slotProducts, deliverySlotKey);
             throw e;
         } catch (Exception e) {
-            if (!saved) takeawaySlotService.releaseSlot(slotKey, slotProducts);
+            if (!saved) releaseWaiterSlots(slotKey, slotProducts, deliverySlotKey);
             ErrorLog.logger.error("Errore aggiunta ordine da waiter", e);
             return null;
         }
+    }
+
+    private void releaseWaiterSlots(TakeawaySlotService.SlotKey takeaway, int products, TakeawaySlotService.SlotKey delivery) {
+        takeawaySlotService.releaseSlot(takeaway, products);
+        if (deliverySlotService != null) deliverySlotService.release(delivery);
     }
 
     /**
@@ -389,9 +414,20 @@ public class OrderComandService {
      * sessione al tavolo, anche table-session-updated: la pagina table-live del cliente ascolta solo quello.
      */
     private void sendOrderKafkaEvent(Comand c, String status) {
+        publishOrderEvent(c, status, null);
+    }
+
+    /**
+     * Evento d'ordine (Kafka order-updated: SSE di dashboard e pagina stato del cliente). {@code deliveryStage}
+     * (facoltativo) = nuovo stage della consegna a domicilio, inoltrato come campo {@code deliveryStage}.
+     */
+    public void publishOrderEvent(Comand c, String status, String deliveryStage) {
         long idAgency = c.getIdAgency();
         try {
-            String json = String.format("{\"id\":\"%s\",\"status\":\"%s\",\"idAgency\":%d}", c.getId(), status, idAgency);
+            String json = deliveryStage == null
+                    ? String.format("{\"id\":\"%s\",\"status\":\"%s\",\"idAgency\":%d}", c.getId(), status, idAgency)
+                    : String.format("{\"id\":\"%s\",\"status\":\"%s\",\"idAgency\":%d,\"deliveryStage\":\"%s\"}",
+                            c.getId(), status, idAgency, deliveryStage);
             orderUpdateProducer.sendUpdate(idAgency, json);
         } catch (Exception e) {
             ErrorLog.logger.error("Errore invio kafka order event", e);
@@ -453,6 +489,11 @@ public class OrderComandService {
      * Push ai dispositivi dello staff per un ordine di un CLIENTE che richiede attenzione (nuovo o da approvare).
      * Mai per gli ordini inseriti dallo staff (addOrderWaiter) né all'approvazione (la fa lo staff stesso).
      */
+    /** Push allo staff per un nuovo ordine di un cliente (usato anche dalla consegna a domicilio). */
+    public void notifyStaffNewOrder(Comand c) {
+        pushToStaff(c);
+    }
+
     private void pushToStaff(Comand c) {
         if (staffPushNotifier == null || c == null || c.getIdAgency() == null) return;
         staffPushNotifier.newOrder(c.getIdAgency(), c.getId());
@@ -489,12 +530,33 @@ public class OrderComandService {
     }
 
     /**
-     * Importo autorizzato (capture manuale, ordine nella riserva): AWAIT_PAYMENT → AWAIT_APPROVAL. Il locale lo vede
-     * in "Da approvare" (Kafka/SSE) ma NON viene stampato: la pipeline "creata" parte solo all'approvazione.
+     * Importo autorizzato (capture manuale).
+     * <ul>
+     *   <li>Ordine nella riserva: AWAIT_PAYMENT → AWAIT_APPROVAL. Il locale lo vede in "Da approvare" (Kafka/SSE) ma
+     *       NON viene stampato: la pipeline "creata" parte solo all'approvazione (che incassa).</li>
+     *   <li>Altrimenti (carta autorizzata, incasso differito): l'importo è garantito, quindi la comanda parte come se
+     *       fosse pagata (paid = true, paymentAuthorized = true = "non ancora incassato") con la pipeline "creata".
+     *       L'incasso avviene quando il locale la prende in carico (PROGRESS/COMPLETED) o col job di sicurezza; se
+     *       viene annullata prima, l'autorizzazione è rilasciata senza commissioni.</li>
+     * </ul>
      */
     public boolean onPaymentAuthorized(String comandId, String paymentIntentId) {
         ComandJpa c = mongoComandReadRepository.findById(comandId).orElse(null);
         if (c == null || c.getStatus() != ComandStatus.AWAIT_PAYMENT) return false;
+        if (!Boolean.TRUE.equals(c.getApprovalRequired())) {
+            ComandStatus target = ComandFlowRules.initialStatus(c.getComandWaiterType());
+            boolean moved = statusUpdater.compareAndSet(comandId, null, List.of(ComandStatus.AWAIT_PAYMENT), target, u -> {
+                u.set("paid", true).set("paidAt", LocalDateTime.now()).set("paymentAuthorized", true);
+                if (paymentIntentId != null) u.set("paymentIntentId", paymentIntentId);
+            });
+            if (!moved) return false;
+            c.setStatus(target);
+            c.setPaid(true);
+            c.setPaymentAuthorized(true);
+            notifyComandCreated(c);
+            pushToStaff(c);
+            return true;
+        }
         LocalDateTime deadline = approvalDeadlineFor(c);
         boolean moved = statusUpdater.compareAndSet(comandId, null, List.of(ComandStatus.AWAIT_PAYMENT),
                 ComandStatus.AWAIT_APPROVAL, u -> {
@@ -587,6 +649,9 @@ public class OrderComandService {
         if (c.getComandWaiterType() == ComandWaiterType.TAKE_AWAY) {
             takeawaySlotService.onTakeawayStatusChanged(idAgency, c.getTime(), c.getCreatedAt(),
                     countProducts(c.getOrders()), oldStatus, ComandStatus.DELETED);
+        }
+        if (c.getComandWaiterType() == ComandWaiterType.HOME && deliverySlotService != null) {
+            deliverySlotService.onStatusChanged(idAgency, c.getTime(), c.getCreatedAt(), oldStatus, ComandStatus.DELETED);
         }
         try {
             eventPublisher.publishEvent(new ComandStatusChangedEvent(c.getId(), String.valueOf(idAgency), oldStatus, ComandStatus.DELETED));
@@ -696,6 +761,10 @@ public class OrderComandService {
                         comandFromWaiterJpa.getCreatedAt(), countProducts(comandFromWaiterJpa.getOrders()),
                         oldStatus, comandStatus);
             }
+            if (comandFromWaiterJpa.getComandWaiterType() == ComandWaiterType.HOME && deliverySlotService != null) {
+                deliverySlotService.onStatusChanged(idAgency, comandFromWaiterJpa.getTime(),
+                        comandFromWaiterJpa.getCreatedAt(), oldStatus, comandStatus);
+            }
 
             try {
                 eventPublisher.publishEvent(new ComandStatusChangedEvent(idComand, String.valueOf(idAgency), oldStatus, comandStatus));
@@ -713,7 +782,8 @@ public class OrderComandService {
     }
 
     /**
-     * Totale della comanda in centesimi: somma di unitPriceCents * quantity su tutti i prodotti.
+     * Totale della comanda in centesimi: somma di unitPriceCents * quantity su tutti i prodotti, più la tariffa di
+     * consegna a domicilio (delivery.feeCents) se presente: è l'importo del pagamento online.
      * Per comande precedenti allo snapshot (unitPriceCents null) usa prezzo opzione + extra salvati sulla comanda.
      * NB: non verifica l'agency — il chiamante deve controllare che la comanda gli appartenga.
      *
@@ -722,8 +792,8 @@ public class OrderComandService {
     public long computeTotalCents(String comandId) {
         Comand comand = mongoComandRepository.findById(comandId)
                 .orElseThrow(() -> new EntityNotFoundException("Comanda non trovata: " + comandId));
-        long total = 0;
-        if (comand.getOrders() == null) return 0;
+        long total = comand.deliveryFeeCents();
+        if (comand.getOrders() == null) return total;
         for (Order order : comand.getOrders()) {
             if (order == null || order.getProducts() == null) continue;
             for (ProductToOrder p : order.getProducts()) {

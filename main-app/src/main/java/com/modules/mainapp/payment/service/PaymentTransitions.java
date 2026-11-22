@@ -1,6 +1,7 @@
 package com.modules.mainapp.payment.service;
 
 import com.modules.common.logs.errorlog.ErrorLog;
+import com.modules.mainapp.payment.PaymentAuthorizationVoidedEvent;
 import com.modules.mainapp.payment.PaymentAuthorizedEvent;
 import com.modules.mainapp.payment.PaymentCompletedEvent;
 import com.modules.mainapp.payment.PaymentRefundedEvent;
@@ -84,10 +85,26 @@ public class PaymentTransitions {
         return paymentRepository.updateStatusIfIn(p.getId(), List.of(STATUS_PENDING), STATUS_FAILED, LocalDateTime.now()) > 0;
     }
 
-    /** Annullato/scaduto presso il provider (mai da AUTHORIZED con addebito anticipato: va rimborsato). */
+    /**
+     * Annullato/scaduto presso il provider (mai da AUTHORIZED con addebito anticipato: va rimborsato).
+     * Da AUTHORIZED (autorizzazione rilasciata, nessun addebito) pubblica {@link PaymentAuthorizationVoidedEvent}
+     * una sola volta: la transizione da AUTHORIZED è un UPDATE condizionale separato.
+     */
     public boolean onCanceled(PaymentJpa p) {
-        List<String> from = Boolean.TRUE.equals(p.getCapturedUpfront()) ? OPEN_STATUSES : CANCELABLE_STATUSES;
-        return paymentRepository.updateStatusIfIn(p.getId(), from, STATUS_CANCELED, LocalDateTime.now()) > 0;
+        if (Boolean.TRUE.equals(p.getCapturedUpfront())) {
+            return paymentRepository.updateStatusIfIn(p.getId(), OPEN_STATUSES, STATUS_CANCELED, LocalDateTime.now()) > 0;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        if (paymentRepository.updateStatusIfIn(p.getId(), List.of(STATUS_AUTHORIZED), STATUS_CANCELED, now) > 0) {
+            ErrorLog.logger.info("Pagamento {} ({}): autorizzazione annullata, nessun addebito né commissione",
+                    p.getId(), p.externalRef());
+            if (hasComand(p)) {
+                eventPublisher.publishEvent(new PaymentAuthorizationVoidedEvent(
+                        p.getComandId(), String.valueOf(p.getIdAgency()), p.getAmountCents(), p.externalRef()));
+            }
+            return true;
+        }
+        return paymentRepository.updateStatusIfIn(p.getId(), OPEN_STATUSES, STATUS_CANCELED, now) > 0;
     }
 
     /**

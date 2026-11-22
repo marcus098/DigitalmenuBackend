@@ -474,33 +474,50 @@ public class TableSessionService {
             // we don't currently index submitted sessions by tableId — best-effort no-op
         }
         TableSessionJpa session = opt.orElse(null);
+        Optional<TableDto> pinned = Optional.empty();
         if (session == null) {
             // try to find any session pinned in TableEntity
-            Optional<TableDto> tOpt = tableUtils.findByIdAndIdAgencyAndDeleted(tableId, idAgency);
-            if (tOpt.isPresent() && tOpt.get().getSessionId() != null && !tOpt.get().getSessionId().isEmpty()) {
-                session = tableSessionRepository.findById(tOpt.get().getSessionId()).orElse(null);
+            pinned = tableUtils.findByIdAndIdAgencyAndDeleted(tableId, idAgency);
+            if (pinned.isPresent() && pinned.get().getSessionId() != null && !pinned.get().getSessionId().isEmpty()) {
+                session = tableSessionRepository.findById(pinned.get().getSessionId()).orElse(null);
             }
         }
-        if (session == null) return errorResp(404, "SESSION_NOT_FOUND");
+        if (session == null) {
+            // Tavolo occupato senza sessione Mongo (aperto prima delle sessioni al tavolo, o sessione persa):
+            // la chiusura deve comunque liberarlo, altrimenti resta occupato e non si può né chiudere né riaprire
+            // (openSession risponde 409 su un tavolo busy).
+            if (pinned.isEmpty()) return errorResp(404, "TABLE_NOT_FOUND");
+            TableDto t = pinned.get();
+            boolean occupied = t.isBusy() || (t.getSessionId() != null && !t.getSessionId().isEmpty());
+            if (!occupied) return errorResp(404, "SESSION_NOT_FOUND");
+            freeTableRow(t, idAgency);
+            log.info("session close without session document tableId={} idAgency={}", tableId, idAgency);
+            Map<String, Object> resp = new LinkedHashMap<>();
+            resp.put("sessionId", null);
+            resp.put("status", "CLOSED");
+            return resp;
+        }
         if (session.getIdAgency() != idAgency) return errorResp(403, "FORBIDDEN");
 
         synchronized (session.getId().intern()) {
             TableSessionJpa fresh = markClosed(session);
 
             Optional<TableDto> tOpt = tableUtils.findByIdAndIdAgencyAndDeleted(tableId, idAgency);
-            tOpt.ifPresent(t -> {
-                t.setBusy(false);
-                t.setSeats(0);
-                t.setSessionId("");
-                t.setCode("");
-                tableUtils.save(t, idAgency);
-            });
+            tOpt.ifPresent(t -> freeTableRow(t, idAgency));
 
             Map<String, Object> resp = new LinkedHashMap<>();
             resp.put("sessionId", fresh.getId());
             resp.put("status", "CLOSED");
             return resp;
         }
+    }
+
+    private void freeTableRow(TableDto t, long idAgency) {
+        t.setBusy(false);
+        t.setSeats(0);
+        t.setSessionId("");
+        t.setCode("");
+        tableUtils.save(t, idAgency);
     }
 
     /**

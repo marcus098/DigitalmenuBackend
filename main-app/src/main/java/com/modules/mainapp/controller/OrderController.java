@@ -96,6 +96,23 @@ public class OrderController {
         return ResponseEntity.ok(checkoutService.summary(f, t));
     }
 
+    /** Storico dei conti chiusi in cassa (date yyyy-MM-dd, estremi inclusi, massimo un anno), dal più recente. */
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
+    @GetMapping("/checkout-history")
+    public ResponseEntity<?> checkoutHistory(@RequestParam("from") String from, @RequestParam("to") String to) {
+        LocalDate f, t;
+        try {
+            f = LocalDate.parse(from);
+            t = LocalDate.parse(to);
+        } catch (DateTimeParseException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Date non valide"));
+        }
+        if (t.isBefore(f) || f.plusYears(1).isBefore(t)) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Intervallo non valido"));
+        }
+        return ResponseEntity.ok(checkoutService.history(f, t));
+    }
+
     /**
      * Prodotti più venduti tra le comande COMPLETED create nel periodo (date yyyy-MM-dd, estremi inclusi,
      * massimo un anno; limit 1..100, default 20). Risposta: [{idProduct, name, categoryName, quantity, revenueCents}]

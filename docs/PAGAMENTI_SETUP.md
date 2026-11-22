@@ -52,8 +52,32 @@ nulla (niente Stripe Connect, niente commissioni di piattaforma). Le chiavi segr
 Ordini asporto "su richiesta" (riserva dello slot) con prepagamento: l'importo viene solo **autorizzato**; viene
 addebitato quando accetti l'ordine, e l'autorizzazione è annullata (nessun addebito) se lo rifiuti o non rispondi in tempo.
 
-Rimborsi: dalla **Cassa**. I pagamenti fatti con un account Stripe diverso da quello attualmente collegato
+Tutti gli altri ordini prepagati (tavolo, asporto, domicilio) pagati con **carta** (anche Apple Pay / Google Pay)
+seguono lo stesso principio per spendere il meno possibile in commissioni:
+
+| Momento | Cosa succede su Stripe | Commissioni |
+| --- | --- | --- |
+| Il cliente paga | importo solo **autorizzato** (`payment_method_options.card.capture_method=manual`); l'ordine parte subito (stampa, dashboard) come "pagato online" | nessuna |
+| Ordine eliminato / "Annulla pagamento" prima dell'incasso | autorizzazione **annullata**, il cliente non viene addebitato | **nessuna** |
+| Ordine messo **In preparazione** o **Completato** (anche chiudendo il conto in Cassa) | **incasso** (capture) | quella normale |
+| Lo stato non viene mai aggiornato | il job incassa comunque dopo **12 ore** (l'autorizzazione carta online vale 7 giorni) | quella normale |
+| Annullamento dopo l'incasso | **rimborso** (totale o parziale) | la commissione del pagamento **non viene restituita** |
+
+I metodi che non supportano l'incasso separato restano a incasso immediato (annullare = rimborso). Se
+un'autorizzazione scade o viene annullata con l'ordine ancora attivo, l'ordine non risulta più pagato online
+(log WARN) e va incassato in altro modo.
+
+Azioni dello staff (titolare): nel **dettaglio ordine** e nello **Storico della Cassa** compaiono
+**Annulla pagamento** (pagamento autorizzato, non incassato: gratis) e **Rimborsa** (pagamento incassato: la
+commissione non torna), con una conferma che lo spiega.
+
+Rimborsi: I pagamenti fatti con un account Stripe diverso da quello attualmente collegato
 (es. dopo un cambio account) si rimborsano dalla dashboard Stripe di quell'account.
+
+Fonti: [Stripe: Place a hold on a payment method](https://docs.stripe.com/payments/place-a-hold-on-a-payment-method)
+(validità 7 giorni per le carte online, incasso separato solo per alcuni metodi, `payment_method_options[card][capture_method]`),
+[Stripe: Refund and cancel payments](https://docs.stripe.com/refunds) ("cancel a payment before it's completed at
+no cost", "processing fees from the original transaction aren't returned").
 
 ### SumUp
 
@@ -71,6 +95,13 @@ notifica viene passato da noi a ogni pagamento e lo stato viene sempre riletto d
 cliente viene **addebitato subito**; se rifiuti l'ordine (o non rispondi entro la scadenza) l'importo viene
 **rimborsato automaticamente** per intero. Se un rimborso automatico fallisce, l'errore viene registrato nei log
 del server e il rimborso va fatto a mano dalla dashboard SumUp.
+
+Per lo stesso motivo con SumUp **non esiste "Annulla pagamento"**: ogni pagamento online è incassato subito e un
+annullamento è sempre un **rimborso** (`POST /v0.1/me/refund/{transaction_id}`). Secondo la documentazione SumUp
+le commissioni della transazione originale non vengono restituite
+([SumUp: Refunds](https://developer.sumup.com/online-payments/guides/refund/)); il centro assistenza SumUp indica
+però che un pagamento rimborsato prima del versamento (payout) non viene addebitato. Il rimborso richiede saldo
+SumUp sufficiente non ancora versato.
 
 ### Cambiare o rimuovere il provider
 
@@ -122,7 +153,9 @@ Admin (ruolo ADMIN, risposta `{data: …}`):
 - `PUT /api/payments/provider/active` `{provider: NONE|STRIPE|SUMUP}`
 - `DELETE /api/payments/provider/stripe`, `DELETE /api/payments/provider/sumup`
 - `GET/PUT /api/payments/settings` (prepagamento), `GET /api/payments`, `GET /api/payments/today-total`,
-  `POST /api/payments/{id}/refund`
+  `POST /api/payments/{id}/refund` (409 se il pagamento è solo autorizzato: va annullato),
+  `POST /api/payments/{id}/cancel` (annulla un'autorizzazione non incassata; 409 se già incassato o ordine da approvare),
+  `GET /api/payments/by-comand/{comandId}` (anche WAITER)
 
 Pubbliche: `GET /api/public/payments/config/{localname}`, `POST /api/public/payments/intent/{localname}`,
 `POST /api/public/payments/sumup/{localname}/sync/{checkoutId}`.

@@ -45,7 +45,13 @@ public class TableController {
     @GetMapping("/delete/{idTable}")
     public ResponseEntity<DataResponse<String>> deleteTable(@PathVariable("idTable") @Min(1) long idTable) {
         int status = tableService.deleteTable(idTable);
-        return ResponseEntity.status(status).body(new DataResponse<String>(null, status == 200 ? "Success" : "Error"));
+        String message = switch (status) {
+            case 200 -> "Success";
+            case 404 -> "Tavolo non trovato";
+            case 409 -> "Il tavolo ha ordini ancora aperti: chiudili prima di eliminarlo";
+            default -> "Impossibile eliminare il tavolo";
+        };
+        return ResponseEntity.status(status).body(new DataResponse<String>(null, message));
     }
 
 

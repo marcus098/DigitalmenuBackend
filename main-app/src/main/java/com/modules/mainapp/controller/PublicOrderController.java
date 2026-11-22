@@ -1,6 +1,9 @@
 package com.modules.mainapp.controller;
 
 import com.modules.authmodule.repository.UserRepository;
+import com.modules.deliverymodule.otp.OtpService;
+import com.modules.deliverymodule.service.DeliveryOrderService;
+import com.modules.deliverymodule.service.DeliverySettingsService;
 import com.modules.mainapp.config.IpRateLimiter;
 import com.modules.mainapp.request.PublicTakeawayRequest;
 import com.modules.ordermodule.exception.OrderRejectedException;
@@ -26,6 +29,12 @@ public class PublicOrderController {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private DeliverySettingsService deliverySettingsService;
+
+    @Autowired
+    private OtpService otpService;
 
     @PostMapping("/orders/insert")
     public ResponseEntity<?> insertClientOrder(
@@ -79,6 +88,12 @@ public class PublicOrderController {
 
         return userRepository.findByUsernameAndDeleted(localname, false)
                 .<ResponseEntity<?>>map(user -> {
+                    // Verifica SMS facoltativa per l'asporto (impostazione del locale), solo se attiva sul server
+                    if (otpService.enabled()
+                            && deliverySettingsService.settings(user.getIdAgency()).isRequirePhoneOtpTakeaway()
+                            && !otpService.isVerified(request.getPhoneToken(), request.getCustomerPhone())) {
+                        return ResponseEntity.status(401).body(Map.of("message", DeliveryOrderService.MSG_PHONE_NOT_VERIFIED));
+                    }
                     OrderComandService.CreationResult created;
                     try {
                         created = orderComandService.addPublicTakeaway(

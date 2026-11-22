@@ -28,6 +28,8 @@ public class ComandCheckout {
     private String loyaltyNote;
     /** Comanda già pagata online: l'incasso è già contato nei pagamenti, qui non va sommato di nuovo. */
     private boolean paidOnline;
+    /** CASH / CARD / OTHER / UNSPECIFIED. Null nei conti chiusi prima di questo campo: si legge come UNSPECIFIED. */
+    private String paymentMethod;
     private LocalDateTime closedAt;
     private Long closedBy;
 
@@ -59,6 +61,8 @@ public class ComandCheckout {
     public void setLoyaltyNote(String loyaltyNote) { this.loyaltyNote = loyaltyNote; }
     public boolean isPaidOnline() { return paidOnline; }
     public void setPaidOnline(boolean paidOnline) { this.paidOnline = paidOnline; }
+    public String getPaymentMethod() { return paymentMethod == null ? "UNSPECIFIED" : paymentMethod; }
+    public void setPaymentMethod(String paymentMethod) { this.paymentMethod = paymentMethod; }
     public LocalDateTime getClosedAt() { return closedAt; }
     public void setClosedAt(LocalDateTime closedAt) { this.closedAt = closedAt; }
     public Long getClosedBy() { return closedBy; }

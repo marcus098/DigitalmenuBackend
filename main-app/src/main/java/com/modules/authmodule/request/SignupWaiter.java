@@ -8,6 +8,17 @@ public class SignupWaiter {
     private String password;
     private String phone;
     private String code;
+    /** ROLE_WAITER (predefinito) o ROLE_DELIVERY (rider). Nessun altro ruolo ammesso. */
+    private String role;
+
+    public String getRole() { return role; }
+    public void setRole(String role) { this.role = role; }
+
+    /** Token Google reCAPTCHA v3 (azione "signup_staff"). Mai loggato. */
+    private String recaptchaToken;
+
+    public String getRecaptchaToken() { return recaptchaToken; }
+    public void setRecaptchaToken(String recaptchaToken) { this.recaptchaToken = recaptchaToken; }
 
     public SignupWaiter(){
 

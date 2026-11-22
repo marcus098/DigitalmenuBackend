@@ -31,6 +31,7 @@ import java.util.stream.Collectors;
 
 import static com.modules.common.utilities.Constants.ROLE_ADMIN;
 import static com.modules.common.utilities.Constants.ROLE_WAITER;
+import static com.modules.common.utilities.Constants.ROLE_DELIVERY;
 
 @Service
 public class UserService implements UserDetailsService {
@@ -301,11 +302,12 @@ public class UserService implements UserDetailsService {
     public List<WaiterDto> getAllWaiters() {
         long idAgency = authUserProvider.getAgencyId();
         return userRepository
-                .findAllByIdAgencyAndDeletedAndRole(idAgency, false, ROLE_WAITER)
+                .findAllByIdAgencyAndDeletedAndRoleIn(idAgency, false, List.of(ROLE_WAITER, ROLE_DELIVERY))
                 .stream()
                 .map(waiter -> {
                     WaiterDto dto = new WaiterDto(waiter.getId(), waiter.getName(), waiter.getSurname(), waiter.getEmail(), waiter.getPhoneNumber());
                     dto.setConfirmed(waiter.isGeneralConfirmed());
+                    dto.setRole(waiter.getRole());
                     return dto;
                 })
                 .collect(Collectors.toList());
@@ -325,7 +327,10 @@ public class UserService implements UserDetailsService {
         long idUser = authUserProvider.getUserId();
         // todo log su mongodb
 
-        User user = userRepository.findByIdAndIdAgencyAndDeleted(id, idAgency, false).orElseThrow();
+        // Solo camerieri e rider del proprio locale (non titolari, non altri locali)
+        User user = userRepository.findByIdAndIdAgencyAndDeleted(id, idAgency, false)
+                .filter(u -> ROLE_WAITER.equals(u.getRole()) || ROLE_DELIVERY.equals(u.getRole()))
+                .orElseThrow();
         user.setDeletedAt(OffsetDateTime.now());
         user.setDeleted(true);
         String oldEmail = user.getEmail();

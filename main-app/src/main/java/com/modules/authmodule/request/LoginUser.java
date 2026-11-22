@@ -5,6 +5,8 @@ import com.modules.common.model.Request;
 public class LoginUser implements Request {
     private String emailUsername;
     private String password;
+    /** Token Google reCAPTCHA v3 (azione "login"), inviato dalla dashboard web. Mai loggato. */
+    private String recaptchaToken;
 
     public LoginUser(){
 
@@ -31,11 +33,19 @@ public class LoginUser implements Request {
         this.emailUsername = emailUsername;
     }
 
+    public String getRecaptchaToken() {
+        return recaptchaToken;
+    }
+
+    public void setRecaptchaToken(String recaptchaToken) {
+        this.recaptchaToken = recaptchaToken;
+    }
+
     @Override
     public String toString() {
         return "LoginUser{" +
                 "emailUsername='" + emailUsername + '\'' +
-                ", password='" + password + '\'' +
+                ", password='***'" +
                 '}';
     }
 

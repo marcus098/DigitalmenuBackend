@@ -36,6 +36,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -257,12 +258,105 @@ public class PaymentService implements ComandPaymentOperations {
     }
 
     /**
+     * Il locale ha preso in carico la comanda (PROGRESS/COMPLETED): incassa l'autorizzazione ancora aperta.
+     * Gli ordini "su richiesta" sono già incassati all'approvazione (la capture è idempotente).
+     *
+     * @return true se incassato, in incasso o nulla da incassare
+     */
+    public boolean captureOnAcceptance(String comandId) {
+        if (comandId == null) return true;
+        List<PaymentJpa> authorized = paymentRepository.findByComandIdAndStatusInOrderByCreatedAtDesc(
+                comandId, List.of(STATUS_AUTHORIZED));
+        if (authorized.isEmpty()) return true;
+        boolean ok = captureAuthorized(comandId);
+        if (ok) ErrorLog.logger.info("Comanda {} presa in carico: autorizzazione incassata", comandId);
+        else ErrorLog.logger.error("Comanda {} presa in carico ma incasso dell'autorizzazione non riuscito: ritenterà il job", comandId);
+        return ok;
+    }
+
+    /** Dopo quanto un'autorizzazione non ancora incassata viene incassata comunque (carte online: valida 7 giorni). */
+    public static final Duration AUTO_CAPTURE_AFTER = Duration.ofHours(12);
+
+    /**
+     * Job di sicurezza: autorizzazioni ferme da più di {@link #AUTO_CAPTURE_AFTER} (il locale non ha aggiornato lo
+     * stato della comanda). Comanda attiva → incasso; eliminata o assente → annullamento (nessuna commissione);
+     * ancora in attesa di pagamento/approvazione → gestita dai job delle comande.
+     *
+     * @return numero di autorizzazioni incassate o annullate
+     */
+    public int settleStaleAuthorizations(LocalDateTime now) {
+        int count = 0;
+        for (PaymentJpa p : paymentRepository.findTop200ByStatusAndUpdatedAtLessThanEqualOrderByUpdatedAtAsc(
+                STATUS_AUTHORIZED, now.minus(AUTO_CAPTURE_AFTER))) {
+            try {
+                Optional<Comand> c = p.getComandId() != null ? mongoComandRepository.findById(p.getComandId()) : Optional.empty();
+                if (c.isPresent() && ComandFlowRules.isWaitingStatus(c.get().getStatus())) continue;
+                boolean done;
+                if (c.isEmpty() || c.get().getStatus() == ComandStatus.DELETED) {
+                    done = providerOf(p).cancel(p);
+                } else {
+                    done = providerOf(p).capture(p);
+                    if (done) ErrorLog.logger.info("Pagamento {} comanda {}: autorizzazione incassata automaticamente dopo {} ore",
+                            p.getId(), p.getComandId(), AUTO_CAPTURE_AFTER.toHours());
+                }
+                if (done) count++;
+                else ErrorLog.logger.error("Pagamento {} comanda {}: autorizzazione non incassata/annullata dal job",
+                        p.getId(), p.getComandId());
+            } catch (RuntimeException e) {
+                ErrorLog.logger.error("Errore job autorizzazioni pagamento {}", p.getId(), e);
+            }
+        }
+        return count;
+    }
+
+    /**
+     * Annulla un'autorizzazione non ancora incassata (azione dello staff "Annulla pagamento"): nessun addebito per il
+     * cliente e nessuna commissione. La comanda resta, ma non risulta più pagata online.
+     *
+     * @throws ResponseStatusException 404 non del locale, 409 non annullabile (già incassato: rimborso; ordine
+     *                                 ancora da approvare: rifiuto)
+     */
+    public Map<String, Object> cancelAuthorization(long paymentId) {
+        long idAgency = authUserProvider.getAgencyId();
+        PaymentJpa p = paymentRepository.findByIdAndIdAgency(paymentId, idAgency)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Pagamento non trovato"));
+        if (STATUS_CANCELED.equals(p.getStatus())) return Map.of("status", STATUS_CANCELED, "amountCents", p.getAmountCents());
+        if (!STATUS_AUTHORIZED.equals(p.getStatus()) || Boolean.TRUE.equals(p.getCapturedUpfront())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Pagamento già incassato: si può solo rimborsare (la commissione non viene restituita)");
+        }
+        if (p.getComandId() != null) {
+            Optional<Comand> c = mongoComandRepository.findById(p.getComandId());
+            if (c.isPresent() && c.get().getStatus() == ComandStatus.AWAIT_APPROVAL) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Ordine da approvare: rifiutalo per annullare l'autorizzazione");
+            }
+        }
+        if (!providerOf(p).cancel(p)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Il pagamento risulta già incassato o non annullabile: riprova tra qualche secondo o usa il rimborso");
+        }
+        return Map.of("status", STATUS_CANCELED, "amountCents", p.getAmountCents());
+    }
+
+    /** Pagamenti della comanda (del locale del chiamante), dal più recente. */
+    public List<PaymentJpa> getPaymentsForComand(String comandId) {
+        return paymentRepository.findByComandIdAndIdAgencyOrderByCreatedAtDesc(comandId, authUserProvider.getAgencyId());
+    }
+
+    /**
      * Rimborso (totale o parziale) di un pagamento del locale del chiamante, tramite il provider del pagamento.
+     * Le commissioni del pagamento originale NON vengono restituite (Stripe; SumUp salvo rimborso prima del payout):
+     * per un'autorizzazione non ancora incassata si usa {@link #cancelAuthorization} (gratis).
      */
     public Map<String, Object> refund(long paymentId, Long requestedCents) {
         long idAgency = authUserProvider.getAgencyId();
         PaymentJpa p = paymentRepository.findByIdAndIdAgency(paymentId, idAgency)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Pagamento non trovato"));
+        if (STATUS_AUTHORIZED.equals(p.getStatus()) && !Boolean.TRUE.equals(p.getCapturedUpfront())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Pagamento non ancora incassato: usa Annulla pagamento (nessuna commissione)");
+        }
         if (!STATUS_COMPLETED.equals(p.getStatus()) && !STATUS_PARTIALLY_REFUNDED.equals(p.getStatus())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Solo i pagamenti completati possono essere rimborsati");
         }

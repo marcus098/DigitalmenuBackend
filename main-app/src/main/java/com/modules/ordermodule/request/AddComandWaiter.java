@@ -15,9 +15,34 @@ public class AddComandWaiter implements Request {
     private String time = "";
     private int seats = 1;
     private ComandWaiterType comandWaiterType;
+    // Domicilio (HOME), tutti facoltativi: senza coordinate la tariffa è 0 (o deliveryFeeCents se indicata)
+    private Double lat;
+    private Double lng;
+    private String intercom;
+    private String floor;
+    private String deliveryNotes;
+    /** CASH (predefinito) · CARD · ONLINE */
+    private String paymentChoice;
+    /** Tariffa decisa dallo staff (centesimi); null = calcolata dalla zona se ci sono le coordinate. */
+    private Long deliveryFeeCents;
 
     public AddComandWaiter() {
     }
+
+    public Double getLat() { return lat; }
+    public void setLat(Double lat) { this.lat = lat; }
+    public Double getLng() { return lng; }
+    public void setLng(Double lng) { this.lng = lng; }
+    public String getIntercom() { return intercom; }
+    public void setIntercom(String intercom) { this.intercom = intercom; }
+    public String getFloor() { return floor; }
+    public void setFloor(String floor) { this.floor = floor; }
+    public String getDeliveryNotes() { return deliveryNotes; }
+    public void setDeliveryNotes(String deliveryNotes) { this.deliveryNotes = deliveryNotes; }
+    public String getPaymentChoice() { return paymentChoice; }
+    public void setPaymentChoice(String paymentChoice) { this.paymentChoice = paymentChoice; }
+    public Long getDeliveryFeeCents() { return deliveryFeeCents; }
+    public void setDeliveryFeeCents(Long deliveryFeeCents) { this.deliveryFeeCents = deliveryFeeCents; }
 
     public AddComandWaiter(List<AddComandOrder> orders, long idTable) {
         this.orders = orders;
