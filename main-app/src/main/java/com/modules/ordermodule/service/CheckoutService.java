@@ -4,6 +4,7 @@ import com.modules.cardmodule.service.CardService;
 import com.modules.common.dto.CardDto;
 import com.modules.common.logs.errorlog.ErrorLog;
 import com.modules.common.model.ComandCheckout;
+import com.modules.common.model.ComandHistoryEntry;
 import com.modules.common.model.enums.ComandStatus;
 import com.modules.ordermodule.model.ComandJpa;
 import com.modules.ordermodule.repository.MongoComandReadRepository;
@@ -84,7 +85,9 @@ public class CheckoutService {
 
         // Scrittura condizionale: due chiusure concorrenti non possono registrare (e accreditare) due volte
         Query q = new Query(Criteria.where("_id").is(comandId).and("idAgency").is(idAgency).and("checkout").exists(false));
-        if (mongoTemplate.updateFirst(q, new Update().set("checkout", co), ComandStatusUpdater.COLLECTION).getModifiedCount() == 0) {
+        Update set = ComandHistory.push(new Update().set("checkout", co),
+                ComandHistoryEntry.checkout(ComandHistory.currentActor(auth)));
+        if (mongoTemplate.updateFirst(q, set, ComandStatusUpdater.COLLECTION).getModifiedCount() == 0) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Conto già chiuso");
         }
 

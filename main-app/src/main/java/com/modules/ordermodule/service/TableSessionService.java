@@ -7,6 +7,7 @@ import com.modules.common.dto.TableDto;
 import com.modules.common.finders.TableUtils;
 import com.modules.common.logs.errorlog.ErrorLog;
 import com.modules.common.model.Comand;
+import com.modules.common.model.ComandHistoryEntry;
 import com.modules.common.model.Order;
 import com.modules.common.model.enums.ComandStatus;
 import com.modules.common.model.enums.ComandWaiterType;
@@ -362,6 +363,7 @@ public class TableSessionService {
                 prepay ? ComandStatus.AWAIT_PAYMENT : ComandStatus.AWAIT, orders, tableSessionId);
         comand.setComandWaiterType(ComandWaiterType.TABLE);
         comand.setClientSessionId(clientSessionId);
+        comand.appendHistory(ComandHistoryEntry.created(ComandHistoryEntry.client(), comand.getStatus()));
         Comand saved = mongoComandRepository.save(comand);
         // Prepagamento: stampa/dashboard partono solo a pagamento confermato (OrderComandService.onPaymentCompleted)
         if (!prepay) orderComandService.notifyComandCreated(saved);

@@ -534,6 +534,29 @@ public class TakeawaySlotService {
         }
     }
 
+    /**
+     * Righe di una comanda asporto modificate dallo staff: allinea i prodotti dello slot (delta, anche negativo) senza
+     * controllo capacità. Solo se il contatore esiste già: altrimenti verrà inizializzato dal conteggio live.
+     */
+    public void adjustProducts(long idAgency, String time, LocalDateTime createdAt, int delta) {
+        if (delta == 0) return;
+        try {
+            LocalDateTime pickup = parsePickup(time, createdAt != null ? createdAt.toLocalDate() : LocalDate.now());
+            if (pickup == null) return;
+            TakeawaySlotConfigJpa cfg = config(idAgency);
+            SlotKey key = new SlotKey(idAgency, pickup.toLocalDate(),
+                    snapToSlotStart(pickup.toLocalTime(), cfg.getSlotDurationMinutes()));
+            mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(key.id())),
+                    new Update().inc("products", delta).currentDate("updatedAt"), TakeawaySlotCounter.class);
+            if (delta < 0) {
+                mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(key.id()).and("products").lt(0)),
+                        new Update().set("products", 0), TakeawaySlotCounter.class);
+            }
+        } catch (Exception e) {
+            ErrorLog.logger.error("Errore aggiornamento prodotti slot asporto dopo modifica comanda", e);
+        }
+    }
+
     /** Crea il contatore dello slot inizializzandolo dal conteggio live (ordini già esistenti), se assente. */
     private void ensureCounter(SlotKey key, int duration) {
         if (mongoTemplate.exists(new Query(Criteria.where("_id").is(key.id())), TakeawaySlotCounter.class)) return;

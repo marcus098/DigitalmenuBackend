@@ -3,10 +3,14 @@ package com.modules.tablemodule.service;
 import com.modules.common.finders.OrderUtils;
 import com.modules.common.logs.errorlog.ErrorLog;
 import com.modules.common.model.Comand;
+import com.modules.common.model.ComandHistoryEntry;
+import com.modules.common.model.ComandTakenBy;
 import com.modules.common.model.EntityLog;
 import com.modules.common.model.enums.ComandStatus;
 import com.modules.common.model.enums.LogOperation;
 import com.modules.ordermodule.event.ComandStatusChangedEvent;
+import com.modules.ordermodule.service.ComandHistory;
+import com.modules.servletconfiguration.security.AuthenticatedUserProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
@@ -37,6 +41,9 @@ public class TableComandCloser {
     private OrderUtils orderUtils;
     @Autowired
     private ApplicationEventPublisher eventPublisher;
+    /** Per il nome di chi chiude il tavolo nello storico delle comande; assente nei test unitari. */
+    @Autowired(required = false)
+    private AuthenticatedUserProvider authUserProvider;
 
     public record Result(int cancelled, int completed) {
         public boolean any() { return cancelled + completed > 0; }
@@ -63,13 +70,16 @@ public class TableComandCloser {
         int cancelled = 0;
         int completed = 0;
         List<EntityLog<?>> logs = new ArrayList<>();
+        ComandTakenBy actor = ComandHistory.currentActor(authUserProvider);
+        if (actor.getId() == null) actor = new ComandTakenBy(idUser, null);
         for (Comand comand : comands) {
             ComandStatus oldStatus = comand.getStatus();
             ComandStatus newStatus = targetStatus(oldStatus);
             if (newStatus == null) continue;
             // update condizionale per singola comanda (solo status): non sovrascrive paid/paymentIntentId del webhook
             // e permette di pubblicare l'evento solo per le comande effettivamente annullate
-            long moved = orderUtils.updateStatusIfIn(List.of(comand.getId()), idAgency, List.of(oldStatus), newStatus);
+            long moved = orderUtils.updateStatusIfIn(List.of(comand.getId()), idAgency, List.of(oldStatus), newStatus,
+                    ComandHistoryEntry.status(actor, oldStatus, newStatus));
             if (moved <= 0) continue;
             comand.setStatus(newStatus);
             logs.add(new EntityLog<>(LogOperation.OTHER, oldStatus, newStatus,

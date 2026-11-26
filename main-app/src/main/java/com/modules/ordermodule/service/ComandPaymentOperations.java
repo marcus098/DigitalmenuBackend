@@ -15,4 +15,22 @@ public interface ComandPaymentOperations {
      *         (es. appena pagato: il webhook non è ancora arrivato)
      */
     boolean cancelOpenIntents(String comandId);
+
+    /** Esito del controllo dei pagamenti online prima di modificare le righe della comanda. */
+    enum ItemsEditGuard {
+        /** Nessun pagamento online valido: si può modificare (gli intent aperti sul vecchio totale sono stati annullati). */
+        NONE,
+        /** Importo autorizzato e non ancora incassato. */
+        AUTHORIZED,
+        /** Importo già incassato (anche se in parte rimborsato). */
+        CAPTURED,
+        /** Un pagamento aperto non è annullabile (forse appena pagato): riprovare tra poco. */
+        BUSY
+    }
+
+    /**
+     * Prima di cambiare le righe (e quindi il totale): segnala autorizzazioni/incassi esistenti e annulla gli intent
+     * ancora aperti (PENDING/FAILED), calcolati sul vecchio totale, così il cliente non paga l'importo sbagliato.
+     */
+    ItemsEditGuard prepareForItemsEdit(String comandId);
 }

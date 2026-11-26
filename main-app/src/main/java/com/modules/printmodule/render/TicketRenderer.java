@@ -1,5 +1,8 @@
 package com.modules.printmodule.render;
 
+import com.modules.common.model.ComandItemChange;
+import com.modules.common.model.enums.ComandItemChangeType;
+
 import java.text.Normalizer;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -7,6 +10,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -41,6 +45,104 @@ public final class TicketRenderer {
 
     public static List<String> render(TicketData d, int width) {
         List<String> out = new ArrayList<>();
+        header(out, d, width);
+
+        String when = d.createdAt() != null ? d.createdAt().format(DATE_TIME) : "";
+        String id = sanitize(d.shortId());
+        out.add(NORMAL + leftRight(when, id.isEmpty() ? "" : "#" + id, width));
+        out.add(NORMAL + "-".repeat(width));
+
+        Map<String, List<TicketData.Item>> byCategory = new LinkedHashMap<>();
+        for (TicketData.Item item : d.items()) {
+            String cat = sanitize(item.category());
+            byCategory.computeIfAbsent(cat.isEmpty() ? "ALTRO" : cat.toUpperCase(), k -> new ArrayList<>()).add(item);
+        }
+        renderItems(out, byCategory, id, width);
+        return out;
+    }
+
+    // ── Variazione ordine ────────────────────────────────────────────────────
+
+    /**
+     * Scontrino "VARIAZIONE ORDINE": stessa intestazione della comanda (tavolo / asporto / domicilio, banner), chi ha
+     * modificato e quando, poi SOLO le differenze (già filtrate per le categorie della stampante):
+     * "- 2x Margherita" (tolto, in negativo), "+ 1x Coca" (aggiunto), "~ Diavola: 1x -> 3x", "~ 1x Margherita" con
+     * "prima:/ora:" per formato/varianti/ingredienti e note.
+     */
+    public static List<String> renderVariation(TicketData d, List<ComandItemChange> changes, String editedBy,
+                                               LocalDateTime editedAt, int width) {
+        List<String> out = new ArrayList<>();
+        header(out, d, width);
+        String who = sanitize(editedBy);
+        String when = editedAt != null ? editedAt.format(HHMM) : "";
+        add(out, BOLD, wrap("Modificato" + (who.isEmpty() ? "" : " da " + who) + (when.isEmpty() ? "" : " alle " + when),
+                width, 0, 2));
+        String id = sanitize(d.shortId());
+        String created = d.createdAt() != null ? "Ordine del " + d.createdAt().format(DATE_TIME) : "";
+        out.add(NORMAL + leftRight(created, id.isEmpty() ? "" : "#" + id, width));
+        out.add(NORMAL + "-".repeat(width));
+
+        for (ComandItemChange c : changes) {
+            if (c == null || c.getType() == null) continue;
+            String name = sanitize(c.getProductName());
+            int oldQty = c.getOldQty() == null ? 0 : c.getOldQty();
+            int newQty = c.getNewQty() == null ? 0 : c.getNewQty();
+            switch (c.getType()) {
+                case REMOVED -> {
+                    add(out, INVERTED, wrap("- " + oldQty + "x " + name, width, 0, 4));
+                    detail(out, c.getOldDescription(), width);
+                    note(out, "Note: ", c.getOldNote(), width);
+                }
+                case ADDED -> {
+                    add(out, BOLD, wrap("+ " + newQty + "x " + name, width, 0, 4));
+                    detail(out, c.getNewDescription(), width);
+                    note(out, "Note: ", c.getNewNote(), width);
+                }
+                case QTY_CHANGED -> {
+                    add(out, BOLD, wrap("~ " + name + ": " + oldQty + "x -> " + newQty + "x", width, 0, 4));
+                    detail(out, c.getNewDescription(), width);
+                    note(out, "Note: ", c.getNewNote(), width);
+                }
+                case VARIANT_CHANGED, NOTE_CHANGED -> {
+                    String qty = oldQty == newQty ? newQty + "x" : oldQty + "x -> " + newQty + "x";
+                    add(out, BOLD, wrap("~ " + qty + " " + name, width, 0, 4));
+                    if (c.getType() == ComandItemChangeType.VARIANT_CHANGED) {
+                        add(out, NORMAL, wrap("prima: " + orNone(c.getOldDescription()), width, 3, 10));
+                        add(out, BOLD, wrap("ora: " + orNone(c.getNewDescription()), width, 3, 8));
+                    } else {
+                        detail(out, c.getNewDescription(), width);
+                    }
+                    if (!Objects.equals(c.getOldNote(), c.getNewNote())) {
+                        add(out, NORMAL, wrap("Note prima: " + orNone(c.getOldNote()), width, 3, 5));
+                        add(out, BOLD, wrap("Note ora: " + orNone(c.getNewNote()), width, 3, 5));
+                    } else {
+                        note(out, "Note: ", c.getNewNote(), width);
+                    }
+                }
+            }
+        }
+        out.add(NORMAL + "-".repeat(width));
+        add(out, CENTER, wrap("*** VARIAZIONE ORDINE ***", width, 0, 0));
+        return out;
+    }
+
+    private static void detail(List<String> out, String description, int width) {
+        String s = sanitize(description);
+        if (!s.isEmpty()) add(out, NORMAL, wrap(s, width, 4, 4));
+    }
+
+    private static void note(List<String> out, String label, String note, int width) {
+        String s = sanitize(note);
+        if (!s.isEmpty()) add(out, NORMAL, wrap(label + s, width, 4, 6));
+    }
+
+    private static String orNone(String s) {
+        String v = sanitize(s);
+        return v.isEmpty() ? "(nessuna)" : v;
+    }
+
+    /** Intestazione comune: locale, tavolo/asporto/domicilio (con il blocco consegna) e banner. */
+    private static void header(List<String> out, TicketData d, int width) {
         int hugeWidth = Math.max(8, width / 2);
 
         if (!sanitize(d.restaurantName()).isEmpty()) add(out, CENTER, wrap(sanitize(d.restaurantName()), width, 0, 0));
@@ -77,17 +179,9 @@ public final class TicketRenderer {
 
         String banner = sanitize(d.banner());
         if (!banner.isEmpty()) add(out, CENTER, wrap("*** " + banner.toUpperCase() + " ***", width, 0, 0));
+    }
 
-        String when = d.createdAt() != null ? d.createdAt().format(DATE_TIME) : "";
-        String id = sanitize(d.shortId());
-        out.add(NORMAL + leftRight(when, id.isEmpty() ? "" : "#" + id, width));
-        out.add(NORMAL + "-".repeat(width));
-
-        Map<String, List<TicketData.Item>> byCategory = new LinkedHashMap<>();
-        for (TicketData.Item item : d.items()) {
-            String cat = sanitize(item.category());
-            byCategory.computeIfAbsent(cat.isEmpty() ? "ALTRO" : cat.toUpperCase(), k -> new ArrayList<>()).add(item);
-        }
+    private static void renderItems(List<String> out, Map<String, List<TicketData.Item>> byCategory, String id, int width) {
 
         int totalQty = 0;
         boolean first = true;
@@ -129,7 +223,6 @@ public final class TicketRenderer {
 
         out.add(NORMAL + "-".repeat(width));
         out.add(NORMAL + leftRight("Articoli: " + totalQty, id.isEmpty() ? "" : "#" + id, width));
-        return out;
     }
 
     /**

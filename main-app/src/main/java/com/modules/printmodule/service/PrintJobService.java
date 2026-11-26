@@ -1,6 +1,7 @@
 package com.modules.printmodule.service;
 
 import com.modules.common.logs.errorlog.ErrorLog;
+import com.modules.common.model.ComandItemChange;
 import com.modules.common.model.enums.ComandStatus;
 import com.modules.ordermodule.model.ComandJpa;
 import com.modules.ordermodule.repository.MongoComandReadRepository;
@@ -73,6 +74,48 @@ public class PrintJobService {
             if (enqueue(p, comandId, PrintJobKind.NEW_ORDER, TicketRenderer.render(ticket.get(), p.charsPerLine()))) count++;
         }
         return count;
+    }
+
+    /**
+     * Righe di una comanda modificate: scontrino "VARIAZIONE ORDINE" con le sole differenze delle sue categorie su ogni
+     * stampante (con coda) che ha già in mano la comanda, cioè che l'ha già stampata/accodata, oppure che l'avrebbe
+     * stampata con la sua regola nello stato attuale (in PROGRESS tutte; in AWAIT/PENDING quelle "alla creazione").
+     * Ordini non ancora in cucina (es. da approvare, regola "all'accettazione") → nessuna stampa: lo scontrino
+     * completo uscirà più avanti già con le righe nuove. Le stampanti tablet (senza coda) sono escluse.
+     */
+    public int enqueueVariation(String comandId, long idAgency, List<ComandItemChange> changes, String editedBy,
+                                LocalDateTime editedAt) {
+        if (changes == null || changes.isEmpty()) return 0;
+        Optional<ComandJpa> opt = comandRepository.findById(comandId);
+        if (opt.isEmpty()) return 0;
+        ComandJpa comand = opt.get();
+        if (comand.getIdAgency() == null || comand.getIdAgency() != idAgency) return 0;
+        ComandStatus status = comand.getStatus();
+        if (status == ComandStatus.DELETED || status == ComandStatus.AWAIT_PAYMENT) return 0;
+
+        TicketFactory.ComandContext ctx = null;
+        int count = 0;
+        for (PrinterDoc p : printerRepository.findEnabledByIdAgency(idAgency)) {
+            if (!isQueued(p)) continue;
+            boolean inKitchen = ruleWouldHavePrinted(p.getPrintOn(), status) || jobRepository.existsForComand(p.getId(), comandId);
+            if (!inKitchen) continue;
+            List<ComandItemChange> mine = changes.stream()
+                    .filter(c -> c != null && TicketFactory.matchesFilter(c.getIdCategory(), c.getCategoryName(), p.getCategoryFilter()))
+                    .toList();
+            if (mine.isEmpty()) continue;
+            if (ctx == null) ctx = ticketFactory.context(comand);
+            List<String> lines = TicketRenderer.renderVariation(ticketFactory.header(ctx, "VARIAZIONE ORDINE"), mine,
+                    editedBy, editedAt, p.charsPerLine());
+            if (enqueue(p, comandId, PrintJobKind.VARIATION, lines)) count++;
+        }
+        return count;
+    }
+
+    /** La stampante, con la sua regola, ha già stampato una comanda in questo stato? */
+    static boolean ruleWouldHavePrinted(PrintOn printOn, ComandStatus status) {
+        if (status == ComandStatus.PROGRESS) return true;
+        PrintOn rule = printOn == null ? PrintOn.CREATED : printOn;
+        return rule == PrintOn.CREATED && (status == ComandStatus.AWAIT || status == ComandStatus.PENDING);
     }
 
     static boolean shouldPrint(PrintOn printOn, Trigger trigger, ComandStatus status) {

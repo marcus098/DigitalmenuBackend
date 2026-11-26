@@ -188,6 +188,7 @@ public class OrderComandService {
             // Chi ha preso l'ordine: dall'utente autenticato, mai dal payload
             comand.setTakenBy(new ComandTakenBy(idUser,
                     ComandTakenBy.displayName(me.getName(), me.getSurname(), me.getUsername())));
+            comand.appendHistory(ComandHistoryEntry.created(comand.getTakenBy(), comand.getStatus()));
             Comand comand1 = (ComandFromWaiterJpa) mongoComandRepository.save(comand);
             saved = true;
 
@@ -382,6 +383,7 @@ public class OrderComandService {
                     prepay ? ComandStatus.AWAIT_PAYMENT : ComandStatus.AWAIT, orders, session.getId());
             comand.setComandWaiterType(ComandWaiterType.TABLE);
             comand.setClientSessionId(request.getClientSessionId());
+            comand.appendHistory(ComandHistoryEntry.created(ComandHistoryEntry.client(), comand.getStatus()));
 
             Comand saved = mongoComandRepository.save(comand);
             // Prepagamento: niente stampa/dashboard finché Stripe non conferma (vedi onPaymentCompleted)
@@ -439,6 +441,24 @@ public class OrderComandService {
     }
 
     /**
+     * Righe della comanda modificate (PUT /api/orders/{id}/items): stesso evento order-updated con
+     * {@code edited: true} e la nuova {@code version}, così dashboard e app rileggono la comanda.
+     */
+    public void publishOrderEdited(Comand c) {
+        try {
+            orderUpdateProducer.sendUpdate(c.getIdAgency(), String.format(
+                    "{\"id\":\"%s\",\"status\":\"%s\",\"idAgency\":%d,\"edited\":true,\"version\":%d}",
+                    c.getId(), c.getStatus(), c.getIdAgency(), c.getVersion()));
+        } catch (Exception e) {
+            ErrorLog.logger.error("Errore invio kafka order event (modifica) comandId=" + c.getId(), e);
+        }
+        String sessionId = c.getTableSessionId();
+        if (tableSessionUpdateProducer != null && sessionId != null && !sessionId.isBlank()) {
+            tableSessionUpdateProducer.sendUpdate(sessionId, "state");
+        }
+    }
+
+    /**
      * Ordine asporto pubblico. Valida i prodotti e prenota atomicamente lo slot di ritiro.
      *
      * Stato iniziale:
@@ -470,6 +490,7 @@ public class OrderComandService {
             if (status == ComandStatus.AWAIT_APPROVAL) {
                 comand.setApprovalDeadline(ComandFlowRules.approvalDeadline(LocalDateTime.now(), reservation.slotStart()));
             }
+            comand.appendHistory(ComandHistoryEntry.created(ComandHistoryEntry.client(), status));
             Comand saved = mongoComandRepository.save(comand);
             switch (status) {
                 case PENDING -> notifyComandCreated(saved);
@@ -520,7 +541,8 @@ public class OrderComandService {
         ComandStatus target = ComandFlowRules.statusAfterPayment(c.getComandWaiterType(), c.getApprovalRequired());
         LocalDateTime deadline = target == ComandStatus.AWAIT_APPROVAL ? approvalDeadlineFor(c) : null;
         boolean moved = statusUpdater.compareAndSet(comandId, null, List.of(ComandStatus.AWAIT_PAYMENT), target,
-                deadline == null ? null : u -> u.set("approvalDeadline", deadline));
+                ComandHistory.with(ComandHistoryEntry.status(ComandHistoryEntry.system(), ComandStatus.AWAIT_PAYMENT, target),
+                        deadline == null ? null : u -> u.set("approvalDeadline", deadline)));
         if (!moved) return false;
         c.setStatus(target);
         if (target == ComandStatus.AWAIT_APPROVAL) notifyAwaitingApproval(c);
@@ -546,6 +568,7 @@ public class OrderComandService {
         if (!Boolean.TRUE.equals(c.getApprovalRequired())) {
             ComandStatus target = ComandFlowRules.initialStatus(c.getComandWaiterType());
             boolean moved = statusUpdater.compareAndSet(comandId, null, List.of(ComandStatus.AWAIT_PAYMENT), target, u -> {
+                ComandHistory.push(u, ComandHistoryEntry.status(ComandHistoryEntry.system(), ComandStatus.AWAIT_PAYMENT, target));
                 u.set("paid", true).set("paidAt", LocalDateTime.now()).set("paymentAuthorized", true);
                 if (paymentIntentId != null) u.set("paymentIntentId", paymentIntentId);
             });
@@ -560,6 +583,8 @@ public class OrderComandService {
         LocalDateTime deadline = approvalDeadlineFor(c);
         boolean moved = statusUpdater.compareAndSet(comandId, null, List.of(ComandStatus.AWAIT_PAYMENT),
                 ComandStatus.AWAIT_APPROVAL, u -> {
+                    ComandHistory.push(u, ComandHistoryEntry.status(ComandHistoryEntry.system(),
+                            ComandStatus.AWAIT_PAYMENT, ComandStatus.AWAIT_APPROVAL));
                     u.set("paymentAuthorized", true).set("approvalDeadline", deadline);
                     if (paymentIntentId != null) u.set("paymentIntentId", paymentIntentId);
                 });
@@ -588,10 +613,12 @@ public class OrderComandService {
     public void approve(String comandId) {
         long idAgency = authUserProvider.getAgencyId();
         long idUser = authUserProvider.getUserId();
+        ComandTakenBy actor = ComandHistory.currentActor(authUserProvider);
         ComandJpa c = requireOwnComand(comandId, idAgency);
         if (c.getStatus() != ComandStatus.AWAIT_APPROVAL
                 || !statusUpdater.compareAndSet(comandId, idAgency, List.of(ComandStatus.AWAIT_APPROVAL),
-                ComandStatus.PENDING, null)) {
+                ComandStatus.PENDING, ComandHistory.with(
+                        ComandHistoryEntry.status(actor, ComandStatus.AWAIT_APPROVAL, ComandStatus.PENDING), null))) {
             throw new OrderRejectedException(409, "L'ordine non è più in attesa di approvazione");
         }
         if (Boolean.TRUE.equals(c.getPaymentAuthorized())) {
@@ -604,7 +631,8 @@ public class OrderComandService {
             }
             if (!captured) {
                 if (statusUpdater.compareAndSet(comandId, idAgency, List.of(ComandStatus.PENDING), ComandStatus.DELETED,
-                        u -> u.set("rejectReason", ComandFlowRules.REASON_CAPTURE_FAILED))) {
+                        ComandHistory.with(ComandHistoryEntry.status(ComandHistoryEntry.system(), ComandStatus.PENDING,
+                                ComandStatus.DELETED), u -> u.set("rejectReason", ComandFlowRules.REASON_CAPTURE_FAILED)))) {
                     afterDeleted(c, ComandStatus.PENDING, true);
                 }
                 throw new OrderRejectedException(409,
@@ -626,16 +654,18 @@ public class OrderComandService {
         ComandJpa c = requireOwnComand(comandId, idAgency);
         String r = reason == null || reason.isBlank() ? "Ordine rifiutato dal locale"
                 : reason.strip().substring(0, Math.min(reason.strip().length(), 300));
-        if (c.getStatus() != ComandStatus.AWAIT_APPROVAL || !rejectInternal(c, idAgency, r)) {
+        if (c.getStatus() != ComandStatus.AWAIT_APPROVAL
+                || !rejectInternal(c, idAgency, r, ComandHistory.currentActor(authUserProvider))) {
             throw new OrderRejectedException(409, "L'ordine non è più in attesa di approvazione");
         }
         saveLog(ComandStatus.AWAIT_APPROVAL, ComandStatus.DELETED, "reject comand " + comandId + ": " + r, idUser, idAgency);
     }
 
-    private boolean rejectInternal(ComandJpa c, Long idAgency, String reason) {
+    private boolean rejectInternal(ComandJpa c, Long idAgency, String reason, ComandTakenBy actor) {
         boolean authorized = Boolean.TRUE.equals(c.getPaymentAuthorized());
         boolean moved = statusUpdater.compareAndSet(c.getId(), idAgency, List.of(ComandStatus.AWAIT_APPROVAL),
                 ComandStatus.DELETED, u -> {
+                    ComandHistory.push(u, ComandHistoryEntry.status(actor, ComandStatus.AWAIT_APPROVAL, ComandStatus.DELETED));
                     u.set("rejectReason", reason);
                     if (authorized) u.set("authorizationCanceled", true);
                 });
@@ -674,7 +704,8 @@ public class OrderComandService {
             try {
                 if (!paymentOperations.getObject().cancelOpenIntents(c.getId())) continue;
                 if (statusUpdater.compareAndSet(c.getId(), null, List.of(ComandStatus.AWAIT_PAYMENT), ComandStatus.DELETED,
-                        u -> u.set("rejectReason", ComandFlowRules.REASON_PAYMENT_EXPIRED))) {
+                        ComandHistory.with(ComandHistoryEntry.status(ComandHistoryEntry.system(), ComandStatus.AWAIT_PAYMENT,
+                                ComandStatus.DELETED), u -> u.set("rejectReason", ComandFlowRules.REASON_PAYMENT_EXPIRED)))) {
                     afterDeleted(c, ComandStatus.AWAIT_PAYMENT, false);
                     count++;
                 }
@@ -692,7 +723,7 @@ public class OrderComandService {
         int count = 0;
         for (ComandJpa c : mongoTemplate.find(q, ComandJpa.class, ComandStatusUpdater.COLLECTION)) {
             try {
-                if (rejectInternal(c, null, ComandFlowRules.REASON_NO_ANSWER)) count++;
+                if (rejectInternal(c, null, ComandFlowRules.REASON_NO_ANSWER, ComandHistoryEntry.system())) count++;
             } catch (Exception e) {
                 ErrorLog.logger.error("Errore rifiuto automatico comanda " + c.getId(), e);
             }
@@ -723,6 +754,7 @@ public class OrderComandService {
         try {
             long idUser = authUserProvider.getUserId();
             long idAgency = authUserProvider.getAgencyId();
+            ComandTakenBy actor = ComandHistory.currentActor(authUserProvider);
 
             Optional<ComandJpa> comand = mongoComandReadRepository.findById(idComand);
             if (comand.isEmpty() || comand.get().getIdAgency() == null || comand.get().getIdAgency() != idAgency) {
@@ -738,7 +770,7 @@ public class OrderComandService {
             if (oldStatus == ComandStatus.AWAIT_APPROVAL) {
                 // dalla dashboard un "elimina" su un ordine da approvare equivale a un rifiuto
                 if (comandStatus != ComandStatus.DELETED) return CompletableFuture.completedFuture(409);
-                boolean rejected = rejectInternal(comandFromWaiterJpa, idAgency, "Ordine rifiutato dal locale");
+                boolean rejected = rejectInternal(comandFromWaiterJpa, idAgency, "Ordine rifiutato dal locale", actor);
                 return CompletableFuture.completedFuture(rejected ? 200 : 409);
             }
             if (oldStatus == ComandStatus.AWAIT_PAYMENT && comandStatus != ComandStatus.DELETED) {
@@ -746,7 +778,8 @@ public class OrderComandService {
             }
 
             // Update condizionale (solo status + updatedAt): non sovrascrive paid/paymentIntentId scritti dal webhook
-            if (!statusUpdater.compareAndSet(idComand, idAgency, List.of(oldStatus), comandStatus, null)) {
+            if (!statusUpdater.compareAndSet(idComand, idAgency, List.of(oldStatus), comandStatus,
+                    ComandHistory.with(ComandHistoryEntry.status(actor, oldStatus, comandStatus), null))) {
                 return CompletableFuture.completedFuture(409);
             }
 

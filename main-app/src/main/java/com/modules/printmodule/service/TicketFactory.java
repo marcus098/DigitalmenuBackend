@@ -100,6 +100,14 @@ public class TicketFactory {
                 deliveryBlock(c)));
     }
 
+    /** Solo l'intestazione della comanda (nessun prodotto): usata dallo scontrino "VARIAZIONE ORDINE". */
+    public TicketData header(ComandContext ctx, String banner) {
+        ComandJpa c = ctx.comand();
+        return new TicketData(ctx.restaurantName(), orderKind(c), ctx.tableName(), c.getName(), c.getPhone(),
+                c.getAddress(), c.getTime(), c.getCreatedAt(), TicketRenderer.shortId(c.getId()), banner, List.of(),
+                deliveryBlock(c));
+    }
+
     /** Blocco DOMICILIO (solo comande HOME con snapshot della consegna). */
     static TicketData.Delivery deliveryBlock(ComandJpa c) {
         ComandDelivery d = c.getDelivery();
@@ -111,9 +119,13 @@ public class TicketFactory {
     }
 
     public static boolean matchesFilter(ProductToOrder p, List<String> filter) {
+        return matchesFilter(p.getIdCategory(), p.getCategoryName(), filter);
+    }
+
+    public static boolean matchesFilter(long idCategory, String categoryName, List<String> filter) {
         if (filter == null || filter.isEmpty()) return true;
-        String id = String.valueOf(p.getIdCategory());
-        String name = p.getCategoryName();
+        String id = String.valueOf(idCategory);
+        String name = categoryName;
         for (String f : filter) {
             if (f == null) continue;
             String v = f.trim();

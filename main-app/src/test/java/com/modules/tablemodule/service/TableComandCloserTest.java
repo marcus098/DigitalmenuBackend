@@ -2,6 +2,8 @@ package com.modules.tablemodule.service;
 
 import com.modules.common.finders.OrderUtils;
 import com.modules.common.model.Comand;
+import com.modules.common.model.ComandHistoryEntry;
+import com.modules.common.model.enums.ComandHistoryAction;
 import com.modules.common.model.enums.ComandStatus;
 import com.modules.ordermodule.event.ComandStatusChangedEvent;
 import com.modules.ordermodule.model.ComandJpa;
@@ -31,7 +33,7 @@ class TableComandCloserTest {
         closer = new TableComandCloser();
         ReflectionTestUtils.setField(closer, "orderUtils", orderUtils);
         ReflectionTestUtils.setField(closer, "eventPublisher", events);
-        when(orderUtils.updateStatusIfIn(anyList(), anyLong(), anyList(), any())).thenReturn(1L);
+        when(orderUtils.updateStatusIfIn(anyList(), anyLong(), anyList(), any(), any())).thenReturn(1L);
     }
 
     private static Comand comand(String id, ComandStatus status) {
@@ -53,10 +55,10 @@ class TableComandCloserTest {
 
         assertEquals(2, r.cancelled());
         assertEquals(2, r.completed());
-        verify(orderUtils).updateStatusIfIn(List.of("qr"), 7L, List.of(ComandStatus.AWAIT), ComandStatus.DELETED);
-        verify(orderUtils).updateStatusIfIn(List.of("prepay"), 7L, List.of(ComandStatus.AWAIT_PAYMENT), ComandStatus.DELETED);
-        verify(orderUtils).updateStatusIfIn(List.of("accettata"), 7L, List.of(ComandStatus.PENDING), ComandStatus.COMPLETED);
-        verify(orderUtils).updateStatusIfIn(List.of("cucina"), 7L, List.of(ComandStatus.PROGRESS), ComandStatus.COMPLETED);
+        verify(orderUtils).updateStatusIfIn(eq(List.of("qr")), eq(7L), eq(List.of(ComandStatus.AWAIT)), eq(ComandStatus.DELETED), any());
+        verify(orderUtils).updateStatusIfIn(eq(List.of("prepay")), eq(7L), eq(List.of(ComandStatus.AWAIT_PAYMENT)), eq(ComandStatus.DELETED), any());
+        verify(orderUtils).updateStatusIfIn(eq(List.of("accettata")), eq(7L), eq(List.of(ComandStatus.PENDING)), eq(ComandStatus.COMPLETED), any());
+        verify(orderUtils).updateStatusIfIn(eq(List.of("cucina")), eq(7L), eq(List.of(ComandStatus.PROGRESS)), eq(ComandStatus.COMPLETED), any());
 
         // l'evento (annullamento autorizzazioni di pagamento) solo per le comande annullate
         ArgumentCaptor<Object> ev = ArgumentCaptor.forClass(Object.class);
@@ -65,6 +67,22 @@ class TableComandCloserTest {
         assertEquals(List.of("qr", "prepay"), ids);
         ev.getAllValues().forEach(e -> assertEquals(ComandStatus.DELETED, ((ComandStatusChangedEvent) e).newStatus()));
         verify(orderUtils).saveAllLogs(argThat(l -> l.size() == 4));
+    }
+
+    @Test
+    void storicoNelloStessoUpdate_daStatoAStato_conChiChiude() {
+        when(orderUtils.findByTableSessionIdAndIdAgencyAndStatusIn(any(), anyLong(), anyList()))
+                .thenReturn(List.of(comand("cucina", ComandStatus.PROGRESS)));
+
+        closer.closeSessionComands("sess-1", 7L, 5L, "test");
+
+        ArgumentCaptor<ComandHistoryEntry> entry = ArgumentCaptor.forClass(ComandHistoryEntry.class);
+        verify(orderUtils).updateStatusIfIn(eq(List.of("cucina")), eq(7L), anyList(), eq(ComandStatus.COMPLETED), entry.capture());
+        assertEquals(ComandHistoryAction.STATUS, entry.getValue().getAction());
+        assertEquals(ComandStatus.PROGRESS, entry.getValue().getFrom());
+        assertEquals(ComandStatus.COMPLETED, entry.getValue().getTo());
+        assertEquals(5L, entry.getValue().getBy().getId());
+        assertNotNull(entry.getValue().getAt());
     }
 
     @Test
@@ -80,7 +98,7 @@ class TableComandCloserTest {
         // il cameriere ha accettato l'ordine un attimo prima: l'update condizionale su AWAIT non trova nulla
         when(orderUtils.findByTableSessionIdAndIdAgencyAndStatusIn(any(), anyLong(), anyList()))
                 .thenReturn(List.of(comand("qr", ComandStatus.AWAIT)));
-        when(orderUtils.updateStatusIfIn(anyList(), anyLong(), anyList(), any())).thenReturn(0L);
+        when(orderUtils.updateStatusIfIn(anyList(), anyLong(), anyList(), any(), any())).thenReturn(0L);
 
         TableComandCloser.Result r = closer.closeSessionComands("sess-1", 7L, 1L, "test");
 

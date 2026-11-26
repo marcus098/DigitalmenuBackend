@@ -2,6 +2,7 @@ package com.modules.deliverymodule.service;
 
 import com.modules.common.logs.errorlog.ErrorLog;
 import com.modules.common.model.Comand;
+import com.modules.common.model.ComandHistoryEntry;
 import com.modules.common.model.ComandDelivery;
 import com.modules.common.model.Order;
 import com.modules.common.model.ProductToOrder;
@@ -169,6 +170,7 @@ public class DeliveryOrderService {
                     cut(req.getCustomerName(), 80), d.getLabel(), time, phone);
             comand.setComandWaiterType(ComandWaiterType.HOME);
             comand.setDelivery(d);
+            comand.appendHistory(ComandHistoryEntry.created(ComandHistoryEntry.client(), status));
             Comand saved = mongoComandRepository.save(comand);
             if (status == ComandStatus.PENDING) {
                 orderComandService.notifyComandCreated(saved);

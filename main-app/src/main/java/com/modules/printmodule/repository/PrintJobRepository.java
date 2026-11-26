@@ -1,6 +1,7 @@
 package com.modules.printmodule.repository;
 
 import com.modules.printmodule.model.PrintJobDoc;
+import com.modules.printmodule.model.PrintJobKind;
 import com.modules.printmodule.model.PrintJobStatus;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
@@ -82,6 +83,12 @@ public class PrintJobRepository {
         Query q = Query.query(Criteria.where("printerId").is(printerId))
                 .with(Sort.by(Sort.Direction.DESC, "createdAt")).limit(limit);
         return mongo.find(q, PrintJobDoc.class);
+    }
+
+    /** true se la stampante ha già ricevuto (o ha in coda) uno scontrino della comanda: nuovo ordine, ristampa o variazione. */
+    public boolean existsForComand(String printerId, String comandId) {
+        return mongo.exists(Query.query(Criteria.where("printerId").is(printerId).and("comandId").is(comandId)
+                .and("kind").ne(PrintJobKind.TEST)), PrintJobDoc.class);
     }
 
     public void deleteByPrinterId(String printerId) {

@@ -5,7 +5,9 @@ import com.modules.common.logs.errorlog.ErrorLog;
 import com.modules.ordermodule.request.AddComandWaiter;
 import com.modules.ordermodule.request.ChangeStatus;
 import com.modules.ordermodule.request.CheckoutRequest;
+import com.modules.ordermodule.request.EditComandItems;
 import com.modules.ordermodule.service.CheckoutService;
+import com.modules.ordermodule.service.ComandItemsEditService;
 import com.modules.ordermodule.service.OrderComandService;
 import com.modules.ordermodule.service.TopProductsService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +20,7 @@ import com.modules.ordermodule.exception.OrderRejectedException;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
@@ -31,6 +34,8 @@ public class OrderController {
     private CheckoutService checkoutService;
     @Autowired
     private TopProductsService topProductsService;
+    @Autowired
+    private ComandItemsEditService comandItemsEditService;
 
     @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
     @PostMapping("/insertWaiter")
@@ -60,6 +65,34 @@ public class OrderController {
         } catch (Exception e) {
             ErrorLog.logger.error("Errore ", e);
             return ResponseEntity.status(500).body("Errore");
+        }
+    }
+
+    /**
+     * Modifica le righe di una comanda aperta (qualsiasi operatore del locale). Corpo: {orders: [{products: [...]}],
+     * expectedVersion} con le righe COMPLETE nel formato di /insertWaiter. Risposta: {comand, totalCents, changes,
+     * changed}; errori {message, code} (400 EMPTY/INVALID, 404 NOT_FOUND, 409 NOT_EDITABLE / VERSION_CONFLICT /
+     * PAID_ONLINE / PAYMENT_AUTHORIZED / PAYMENT_IN_PROGRESS).
+     */
+    @PreAuthorize("hasAnyRole('ROLE_ADMIN', 'ROLE_WAITER')")
+    @PutMapping("/{id}/items")
+    public ResponseEntity<?> editItems(@PathVariable("id") String id, @RequestBody EditComandItems request) {
+        try {
+            ComandItemsEditService.EditResult r = comandItemsEditService.editItems(id, request);
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("comand", r.comand());
+            body.put("totalCents", r.totalCents());
+            body.put("changes", r.changes());
+            body.put("changed", r.changed());
+            return ResponseEntity.ok(body);
+        } catch (OrderRejectedException e) {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("message", e.getMessage());
+            body.put("code", e.getCode() != null ? e.getCode() : (e.getStatus() == 400 ? "INVALID" : "REJECTED"));
+            return ResponseEntity.status(e.getStatus()).body(body);
+        } catch (Exception e) {
+            ErrorLog.logger.error("Errore modifica righe comanda " + id, e);
+            return ResponseEntity.status(500).body(Map.of("message", "Errore", "code", "ERROR"));
         }
     }
 

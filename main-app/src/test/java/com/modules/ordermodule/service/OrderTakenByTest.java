@@ -109,6 +109,19 @@ class OrderTakenByTest {
     }
 
     @Test
+    void creationIsTheFirstHistoryEntry() {
+        service.addOrderWaiter(takeaway());
+        ArgumentCaptor<Comand> saved = ArgumentCaptor.forClass(Comand.class);
+        verify(comandRepo).save(saved.capture());
+        assertEquals(1, saved.getValue().getHistory().size());
+        var entry = saved.getValue().getHistory().get(0);
+        assertEquals(com.modules.common.model.enums.ComandHistoryAction.CREATED, entry.getAction());
+        assertEquals(7L, entry.getBy().getId());
+        assertEquals("Mario Rossi", entry.getBy().getName());
+        assertEquals(saved.getValue().getStatus(), entry.getTo());
+    }
+
+    @Test
     void fallsBackToUsernameWithoutName() {
         waiter.setName(null);
         waiter.setSurname(" ");

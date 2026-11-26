@@ -1,6 +1,7 @@
 package com.modules.common.finders;
 
 import com.modules.common.model.Comand;
+import com.modules.common.model.ComandHistoryEntry;
 import com.modules.common.model.EntityLog;
 import com.modules.common.model.enums.ComandStatus;
 
@@ -17,5 +18,9 @@ public interface OrderUtils {
      * @return numero di comande aggiornate
      */
     long updateStatusIfIn(List<String> comandIds, long idAgency, List<ComandStatus> fromStatuses, ComandStatus newStatus);
+
+    /** Come sopra, aggiungendo nello stesso update la voce {@code history} allo storico (null = nessuna voce). */
+    long updateStatusIfIn(List<String> comandIds, long idAgency, List<ComandStatus> fromStatuses, ComandStatus newStatus,
+                          ComandHistoryEntry history);
 
 }

@@ -22,6 +22,7 @@ import com.modules.ordermodule.model.ComandJpa;
 import com.modules.ordermodule.repository.MongoComandRepository;
 import com.modules.ordermodule.service.ComandFlowRules;
 import com.modules.ordermodule.service.ComandPaymentOperations;
+import com.modules.ordermodule.service.ComandPaymentOperations.ItemsEditGuard;
 import com.modules.servletconfiguration.security.AuthenticatedUserProvider;
 import com.stripe.exception.SignatureVerificationException;
 import com.stripe.model.Charge;
@@ -255,6 +256,35 @@ public class PaymentService implements ComandPaymentOperations {
         }
         PaymentJpa p = authorized.get(0);
         return providerOf(p).capture(p);
+    }
+
+    /**
+     * Modifica delle righe della comanda: un importo già incassato (o addebitato subito da SumUp) o autorizzato non
+     * viene mai toccato (il chiamante rifiuta la modifica); gli intent ancora aperti, calcolati sul vecchio totale,
+     * vengono annullati (al prossimo pagamento se ne crea uno col totale nuovo).
+     */
+    @Override
+    public ItemsEditGuard prepareForItemsEdit(String comandId) {
+        if (comandId == null) return ItemsEditGuard.NONE;
+        if (paymentRepository.existsByComandIdAndStatus(comandId, STATUS_COMPLETED)
+                || paymentRepository.existsByComandIdAndStatus(comandId, STATUS_PARTIALLY_REFUNDED)) {
+            return ItemsEditGuard.CAPTURED;
+        }
+        List<PaymentJpa> authorized = paymentRepository.findByComandIdAndStatusInOrderByCreatedAtDesc(
+                comandId, List.of(STATUS_AUTHORIZED));
+        if (!authorized.isEmpty()) {
+            return authorized.stream().anyMatch(p -> Boolean.TRUE.equals(p.getCapturedUpfront()))
+                    ? ItemsEditGuard.CAPTURED : ItemsEditGuard.AUTHORIZED;
+        }
+        for (PaymentJpa p : paymentRepository.findByComandIdAndStatusInOrderByCreatedAtDesc(comandId, OPEN_STATUSES)) {
+            try {
+                if (!providerOf(p).cancel(p)) return ItemsEditGuard.BUSY;
+            } catch (RuntimeException e) {
+                ErrorLog.logger.error("Errore annullamento pagamento {} prima della modifica della comanda {}", p.getId(), comandId, e);
+                return ItemsEditGuard.BUSY;
+            }
+        }
+        return ItemsEditGuard.NONE;
     }
 
     /**

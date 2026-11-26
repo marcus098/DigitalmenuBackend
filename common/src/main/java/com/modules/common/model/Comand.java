@@ -38,8 +38,30 @@ public abstract class Comand {
     private ComandDelivery delivery;
     /** Operatore dello staff che ha inserito la comanda (null = ordine del cliente). */
     private ComandTakenBy takenBy;
+    /**
+     * Versione delle righe: parte da 0 (null nelle comande precedenti) e cresce di 1 a ogni modifica dei prodotti.
+     * Serve a riconoscere modifiche concorrenti (PUT /api/orders/{id}/items con expectedVersion).
+     */
+    private Long version;
+    /** Storico (creazione, modifiche, cambi di stato), dal più vecchio; massimo ComandHistoryEntry.MAX_ENTRIES voci. */
+    private List<ComandHistoryEntry> history;
 
     public Comand() {}
+
+    public long getVersion() { return version == null ? 0L : version; }
+    public void setVersion(Long version) { this.version = version; }
+
+    /** Mai null in JSON: le comande precedenti allo storico restituiscono una lista vuota. */
+    public List<ComandHistoryEntry> getHistory() { return history == null ? new ArrayList<>() : history; }
+    public void setHistory(List<ComandHistoryEntry> history) { this.history = history; }
+
+    /** Aggiunge una voce in memoria (prima del salvataggio di una nuova comanda), tenendo le ultime MAX_ENTRIES. */
+    public void appendHistory(ComandHistoryEntry entry) {
+        if (entry == null) return;
+        if (history == null) history = new ArrayList<>();
+        history.add(entry);
+        while (history.size() > ComandHistoryEntry.MAX_ENTRIES) history.remove(0);
+    }
 
     public ComandTakenBy getTakenBy() { return takenBy; }
     public void setTakenBy(ComandTakenBy takenBy) { this.takenBy = takenBy; }

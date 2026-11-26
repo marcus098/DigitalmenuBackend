@@ -84,6 +84,9 @@ public class AggregatingKafkaConsumer {
             if (event.get("paid") instanceof Boolean paid) projected.put("paid", paid);
             // stage della consegna a domicilio (PREPARING / OUT_FOR_DELIVERY / DELIVERED): non sensibile
             if (event.get("deliveryStage") instanceof String stage) projected.put("deliveryStage", stage);
+            // righe modificate (PUT /api/orders/{id}/items): il client rilegge la comanda; version = nuova versione
+            if (event.get("edited") instanceof Boolean edited) projected.put("edited", edited);
+            if (event.get("version") instanceof Number version) projected.put("version", version.longValue());
             event = projected;
             ordersByAgency.computeIfAbsent(agencyId, k -> new ArrayList<>()).add(event);
         }
